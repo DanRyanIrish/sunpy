@@ -240,18 +240,28 @@ def file_search(path, pattern):
     -------
     files : generator
         File names of files found matching pattern.
-        A generator is not very memory hungry and useful if you want to
+        A generator is not very memory hungry and thus useful if you want to
         iterate through each found file, e.g.
         >>> for file in files:
                 print file
         'path/file0.name'
         'path/file1.name'
-        etc.  However, to access elements by index, find the number of files
-        found (i.e. len()) etc., this must be converted to a list or numpy
-        array.  By converting it to a numpy array, functions such as
-        numpy.where, numpy.logical_or, etc., can also be applied to find
-        entries satisfying more specific criteria.  To produce a list or array
-        from the generator, simply type
+        etc.  It is also useful if you only want the first result returned
+        which can be obtained using the next() attribute which moves the
+        generator on to the next result.  So the first result can easily be
+        obtained by doing
+        >>> first_file = file_search(path, pattern).next()
+        or equivalently,
+        >>> files = file_search(path, pattern)
+        >>> first_file = files.next()
+        After this the next() attribute will move the generator on to the
+        second result, then third, etc.  However, to access elements
+        by index, find the number of files found (i.e. len()) etc., this must
+        be converted to a list or numpy array.  By converting it to a numpy
+        array, functions such as numpy.where, numpy.logical_or, etc., can also
+        be applied to find entries satisfying more specific criteria,
+        e.g. looking for duplicate files.  To produce a list or array from the
+        generator, simply type
         >>> files_list = list(file_search(path, pattern))
         for a list, or
         >>> files_array = np.asarray(list(file_search(path, pattern)))
