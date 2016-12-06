@@ -122,9 +122,9 @@ class SlitSpectrum(NDData):
                                  "If you do not want to define " +
                                  "slit_positions, set to None.")
         NDData.__init__(self, data, data_unit)
-        self.spectral_axis = np.asarray(spectral_axis)
-        self.slit_axis = np.asarray(slit_axis)
-        self.time_axis = np.asarray(time_axis)
+        self.spectral_axis = spectral_axis
+        self.slit_axis = slit_axis
+        self.time_axis = time_axis
         self.raster_positiosn = raster_positions
 
     def extract_spectrum1D(self, time_min, time_max, slit_min, slit_max,
