@@ -85,16 +85,16 @@ class SlitSpectrum(NDData):
 
     Attributes
     ----------
-    data : `numpy.ndarray`
+    data : `astropy.nddata.NDData`
         3D (T x Y x lambda) array giving the intensity at each spectral
         position (lambda) and each position along the slit (Y) for each
         time (T).
-    spectral_axis : `astropy.units.quantity.Quantity`
-        wavelength axis of spectrograph observations.
-    slit_axis : `numpy.ndarray`
-        Array of distance along the slit.
     time_axis : array-like of datetime objects.
         Time of each spectrum measurement.
+    slit_axis : `numpy.ndarray`
+        Array of distance along the slit.
+    spectral_axis : `astropy.units.quantity.Quantity`
+        wavelength axis of spectrograph observations.
     raster_positions : `numpy.ndarray`
         Array of length T giving raster position of each spectrum.
         Default=None
@@ -104,9 +104,23 @@ class SlitSpectrum(NDData):
 
     """
     def __init__(self, data, time_axis, slit_axis, spectral_axis,
-                 data_unit=None, spectral_unit=None, slit_unit=None,
-                 slit_coords=None, raster_positions=None):
-        """Initializes a SlitSpectrum object."""
+                 data_unit=None, slit_coords=None, raster_positions=None):
+        """Initializes a SlitSpectrum object.
+
+        Parameters
+        ----------
+        data : `numpy.ndarray`-like of `astropy.nddata.NDData`-like
+            3D (T x Y x lambda) array giving the intensity at each spectral
+            position (lambda) and each position along the slit (Y) for each
+            time (T).
+        time_axis : array-like of datetime objects.
+            Time of each spectrum measurement.
+        slit_axis : `astropy.units.quantity.Quantity`
+            Array of distance along the slit.
+        spectral_axis : `astropy.units.quantity.Quantity`
+            wavelength axis of spectrograph observations.
+
+        """
         # Check that input dimensions are consistent.
         if data.shape[0] != len(time_axis):
             raise ValueError("1st dimension of data must equal number" +
@@ -121,6 +135,11 @@ class SlitSpectrum(NDData):
                                  "equal dimensions of slit_position. " +
                                  "If you do not want to define " +
                                  "slit_positions, set to None.")
+        # Ensure slit and spectral axes are Quantities.
+        if type(slit_axis) is not astropy.units.quantity.Quantity:
+            raise TypeError("slit_axis must be an astropy Quantity.")
+        if type(spectral_axis) is not astropy.units.quantity.Quantity:
+            raise TypeError("spectral_axis must be an astropy Quantity.")
         NDData.__init__(self, data, data_unit)
         self.spectral_axis = spectral_axis
         self.slit_axis = slit_axis
