@@ -65,23 +65,6 @@ class IRISSpectrum():
         level1_info = np.array(hdulist[-1].data)
         # Close file
         hdulist.close()
-        ## The below double commented out lines show how the empty
-        ## housekeeping data array could be defined using header info.
-        ##last_header_keys = hdulist[-1].header.keys()
-        ##n_last_header_keys = len(last_header_keys)
-        ##last_header_colnames_index = \
-        ##  np.arange(n_last_header_keys)[np.array(["TTYPE" in key for key in last_header_keys])]
-        ##n_last_header_cols = len(last_header_colnames_index)
-        ##last_header_dtypes_index = \
-        ##  np.arange(n_last_header_keys)[np.array(["TFORM" in key for key in last_header_keys])]
-        ##last_header_format_components = [(last_header[index][0], last_header[index][1:])
-        ##                                 for index in last_header_dtypes_index]
-        ##idl_to_python_formats = {"A": "S"}
-        ##last_header_dtypes = [(last_header[last_header_colnames_index[i]],
-        ##                       idl_to_python_formats[last_header_format_components[i][0]] + \
-        ##                       last_header_format_components[i][1])
-        ##                       for i in range(n_last_header_cols)]
-        ##level1_info = np.empty(0, dtype=last_header_dtypes)
         # If more than one FITS file is supplied, Open each file and
         # read out data.
         if len(filenames) > 1:
