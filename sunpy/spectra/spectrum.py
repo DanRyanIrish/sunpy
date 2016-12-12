@@ -145,7 +145,7 @@ class SlitSpectrum(NDData):
         self.spectral_axis = spectral_axis
         self.slit_axis = slit_axis
         self.time_axis = time_axis
-        self.raster_positiosn = raster_positions
+        self.raster_positions = raster_positions
 
     def extract_spectrum1D(self, time_min, time_max, slit_min, slit_max,
                            spectral_min, spectral_max):

@@ -6,6 +6,7 @@ import collections
 
 import numpy as np
 from astropy.io import fits
+import astropy.units as u
 from astropy.units.quantity import Quantity
 from astropy.table import Table, vstack
 
@@ -32,38 +33,40 @@ class IRISSpectrum():
     level1_info : `numpy.recarray`
        Additional data from last FITS extension of IRIS FITS file including
        level 1 file names from which data was derived.
-    meta : `list` of lists
+    _meta : `list` of lists
         Each sublist gives the various headers for an IRIS spectral file used
         to generate object.
-    observation_id : `int`
-        IRIS observation ID number for observing mode used for particular campaign.
-    observation_description : `str`
-        Description of observing mode used for particular campaign.
-    telescope : `str`
-        "IRIS"
-    instrument : `str`
-        "SPEC".  Designates that IRIS spectrograph was used to take observations
-        as opposed to slit-jaw imager (SJI).
-    dsun : `astropy.units.quantity.Quantity`
-        Distance from IRIS to Sun during campaign.
-    observation_start : `datetime.datetime`
-        Start time of observing campaign.
-    observation_end : `datetime.datetime`
-        End time of observing campaign.
-    n_spectral_windows : `int`
-        Number of spectral windows read into object.
-    spectral_windows : `astropy.table.Table`
-        Information on the spectral windows read into object.  Columns:
-        name : `str`
-            Name of spectral window.
-        detector type : `str`
-            Spectral range/section of CCD from which data was recorded.
-        brightest wavelength : `float`, unit aware
-            Brightest wavelength in spectral window.
-        min wavelength : `float`, unit aware
-            Minimum wavelength in spectral window.
-        max wavelength : `float`, unit aware
-            Maximum wavelength in spectral window.
+    meta : `dict`
+        Useful metadata made easily accessible.  Contains the following keys:
+            observation_id : `int`
+                IRIS observation ID number for observing mode used during campaign.
+            observation_description : `str`
+                Description of observing mode used for particular campaign.
+            telescope : `str`
+                "IRIS"
+            instrument : `str`
+                "SPEC".  Designates that IRIS spectrograph was used to take observations
+                as opposed to slit-jaw imager (SJI).
+            dsun : `astropy.units.quantity.Quantity`
+                Distance from IRIS to Sun during campaign.
+            observation_start : `datetime.datetime`
+                Start time of observing campaign.
+            observation_end : `datetime.datetime`
+                End time of observing campaign.
+            n_spectral_windows : `int`
+                Number of spectral windows read into object.
+            spectral_windows : `astropy.table.Table`
+                Information on the spectral windows read into object.  Columns:
+                name : `str`
+                    Name of spectral window.
+                detector type : `str`
+                    Spectral range/section of CCD from which data was recorded.
+                brightest wavelength : `float`, unit aware
+                    Brightest wavelength in spectral window.
+                min wavelength : `float`, unit aware
+                    Minimum wavelength in spectral window.
+                max wavelength : `float`, unit aware
+                    Maximum wavelength in spectral window.
 
     """
     def __init__(self, filenames, windows="All"):
@@ -89,32 +92,36 @@ class IRISSpectrum():
         # Open first IRIS spectral file and attach useful metadata
         # common to all files.
         hdulist = fits.open(filenames[0])
-        self.meta = [[hdu.header for hdu in hdulist]]
+        self._meta = [[hdu.header for hdu in hdulist]]
         window_headers = [hdu.header for hdu in hdulist[1:-2]]
-        self.observation_id = int(hdulist[0].header["OBSID"])
-        self.observation_description = hdulist[0].header["OBS_DESC"]
-        self.telescope = hdulist[0].header["TELESCOP"]
-        self.instrument = hdulist[0].header["INSTRUME"]
-        self.dsun = Quantity(hdulist[0].header["DSUN_OBS"], unit="m")
-        self.observation_start = hdulist[0].header["STARTOBS"]
-        self.observation_end = hdulist[0].header["ENDOBS"]
+        self.meta = {"observation_id": int(hdulist[0].header["OBSID"]),
+                     "observation_description": hdulist[0].header["OBS_DESC"],
+                     "telescope": hdulist[0].header["TELESCOP"],
+                     "instrument": hdulist[0].header["INSTRUME"],
+                     "dsun": Quantity(hdulist[0].header["DSUN_OBS"], unit="m"),
+                     "observation_start": hdulist[0].header["STARTOBS"],
+                     "observation_end": hdulist[0].header["ENDOBS"],
+                     "n_spectral_windows": int(hdulist[0].header["NWIN"]),
+                     "satellite_roll_angle": Quantity(
+                         float(hdulist[0].header["SAT_ROT"]), unit=u.deg)}
         # Extract information on spectral windows.
-        self.n_spectral_windows = int(hdulist[0].header["NWIN"])
         self.spectral_windows = Table([
-            [hdulist[0].header["TDESC{0}".format(i)] for i in range(1, self.n_spectral_windows+1)],
-            [hdulist[0].header["TDET{0}".format(i)] for i in range(1, self.n_spectral_windows+1)],
+            [hdulist[0].header["TDESC{0}".format(i)]
+             for i in range(1, self.meta["n_spectral_windows"]+1)],
+            [hdulist[0].header["TDET{0}".format(i)]
+             for i in range(1, self.meta["n_spectral_windows"]+1)],
             Quantity([hdulist[0].header["TWAVE{0}".format(i)]
-                      for i in range(1, self.n_spectral_windows+1)], unit="angstrom"),
+                      for i in range(1, self.meta["n_spectral_windows"]+1)], unit="angstrom"),
             Quantity([hdulist[0].header["TWMIN{0}".format(i)]
-                      for i in range(1, self.n_spectral_windows+1)], unit="angstrom"),
+                      for i in range(1, self.meta["n_spectral_windows"]+1)], unit="angstrom"),
             Quantity([hdulist[0].header["TWMAX{0}".format(i)]
-                      for i in range(1, self.n_spectral_windows+1)], unit="angstrom")],
+                      for i in range(1, self.meta["n_spectral_windows"]+1)], unit="angstrom")],
             names=("name", "detector type", "brightest wavelength",
                    "min wavelength", "max wavelength"))
         # Convert data from each spectral window in first FITS file to
         # an array.  Then combine these arrays into a list.  Each array
         # can then be concatenated with data from subsequent FITS files.
-        data = [np.array(hdulist[i].data) for i in range(1, self.n_spectral_windows+1)]
+        data = [np.array(hdulist[i].data) for i in range(1, self.meta["n_spectral_windows"]+1)]
         # Convert auxilary data from first FITS file to an array.
         # Auxilary data from subsequent FITS files can then be
         # concatenated with this array.
@@ -131,16 +138,17 @@ class IRISSpectrum():
             for filename in filenames[1:]:
                 hdulist = fits.open(filename)
                 # Raise error if file not part of same OBS.
-                if hdulist[0].header["STARTOBS"] != self.observation_start:
+                if hdulist[0].header["STARTOBS"] != self.meta["observation_start"]:
                     raise IOError(
                         "Files must be part of same observation. Current file has different " + \
                         "OBS start time from first file.\n" + \
                         "First file: {0}\n".format(filenames[0]) + \
                         "Current file: {0}\n".format(filename) + \
-                        "OBS start time of first file: {0}\n".format(self.observation_start) + \
+                        "OBS start time of first file: {0}\n".format(self.meta["observation_start"]) + \
                         "OBS start time of current file: {0}".format(hdulist[0].header["STARTOBS"])
                         )
-                for i in range(self.n_spectral_windows):
+                self._meta.append([hdu.header for hdu in hdulist])
+                for i in range(self.meta["n_spectral_windows"]):
                     data[i] = np.concatenate((data[i], np.array(hdulist[i+1].data)), axis=0)
                 auxilary_data = vstack(
                     [auxilary_data, Table(rows=hdulist[-2].data, names=hdulist[-2].header[7:])])
@@ -149,15 +157,17 @@ class IRISSpectrum():
                 hdulist.close()
         # Extract and convert time to datetime objects and then delete
         # time from auxilary data.
-        time_axis = np.array([parse_time(self.observation_start)+datetime.timedelta(seconds=i)
-                              for i in auxilary_data["TIME"]])
+        time_axis = np.array([
+            parse_time(self.meta["observation_start"])+datetime.timedelta(seconds=i)
+            for i in auxilary_data["TIME"]])
         del(auxilary_data["TIME"])
-        # Generate OrderedDict of SlitSpectrum objects for each spectral window.
-        self.data = collections.OrderedDict([
-            (self.spectral_windows["name"][i],
-             SlitSpectrum(data[i], time_axis, self._get_axis("slit", self.spectral_windows["name"][i]),
-                          self._get_axis("spectral", self.spectral_windows["name"][i])))
-            for i in range(self.n_spectral_windows)])
+        # Generate dictionary of SlitSpectrum objects for each spectral window.
+        self.data = dict([(self.spectral_windows["name"][i],
+                           SlitSpectrum(
+                               data[i], time_axis,
+                               self._get_axis("slit", self.spectral_windows["name"][i]),
+                               self._get_axis("spectral", self.spectral_windows["name"][i])))
+            for i in range(self.meta["n_spectral_windows"])])
         # Attach auxilary data and level1 info to object.
         self.auxilary_data = auxilary_data
         self.level1_info = level1_info
@@ -186,7 +196,7 @@ class IRISSpectrum():
         else:
             raise ValueError("axis_type must be 'spectral', 'slit', 'raster' or 'time'.")
         window_index = np.where(self.spectral_windows["name"] == spectral_window)[0][0]+1
-        header = self.meta[0][window_index]
+        header = self._meta[0][window_index]
         axis = Quantity(header["CRVAL{0}".format(axis_index)] + \
                         header["CDELT{0}".format(axis_index)] * \
                         np.arange(0, header["NAXIS{0}".format(axis_index)]),
