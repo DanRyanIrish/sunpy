@@ -6,6 +6,7 @@ from __future__ import absolute_import
 import datetime
 
 import numpy as np
+import astropy
 from astropy.nddata import NDData
 from matplotlib import pyplot as plt
 
@@ -164,7 +165,7 @@ class SlitSpectrum(NDData):
             self.data[w_time, :, :].mean(axis=0)[w_slit, :].sum(axis=0)[w_spectral],
             self.spectral_axis)
 
-    def plot_spectrum1D(spectral_min, spectral_max, slit_min, slit_max, spectrum_time):
+    def plot_spectrum1D(self, time_min, time_max, slit_min, slit_max, spectral_min, spectral_max):
         """Plots a 1D spectrum from a section of the slit, a spectral range at a given time."""
-        self.extract_spectrum1D(spectral_min, spectral_max, slit_min, slit_max,
-                                spectrum_time).peek()
+        self.extract_spectrum1D(time_min, time_max, slit_min, slit_max,
+                                spectral_min, spectral_max).plot()
