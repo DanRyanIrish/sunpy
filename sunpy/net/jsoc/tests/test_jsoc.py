@@ -4,7 +4,7 @@ Created on Wed Mar 26 20:17:06 2014
 
 @author: stuart
 """
-import time
+import os
 import tempfile
 import datetime
 import astropy.table
@@ -16,7 +16,6 @@ from sunpy.time import parse_time
 from sunpy.net.jsoc import JSOCClient, JSOCResponse
 from sunpy.net.vso.vso import Results
 import sunpy.net.jsoc.attrs as attrs
-
 
 client = JSOCClient()
 
@@ -135,8 +134,8 @@ def  test_empty_jsoc_response():
 
 @pytest.mark.online
 def test_query():
-    Jresp = client.query(attrs.Time('2012/1/1T00:00:00', '2012/1/1T00:00:45'),
-                         attrs.Series('hmi.M_45s'))
+    Jresp = client.query(attrs.Time('2012/1/1T00:00:00', '2012/1/1T00:01:30'),
+                         attrs.Series('hmi.M_45s'),attrs.Sample(90*u.second))
     assert isinstance(Jresp, JSOCResponse)
     assert len(Jresp) == 2
 
@@ -178,7 +177,7 @@ def test_post_fail(recwarn):
     client.request_data(res, return_resp=True)
     w = recwarn.pop(Warning)
     assert issubclass(w.category, Warning)
-    assert "Query 0 retuned status 4 with error Series none is not a valid series accessible from hmidb2." in str(w.message)
+    assert "Query 0 returned status 4 with error Series none is not a valid series accessible from hmidb2." == str(w.message)
     assert w.filename
     assert w.lineno
 
@@ -220,6 +219,8 @@ def test_results_filenames():
     assert isinstance(aa, Results)
     files = aa.wait()
     assert len(files) == len(responses)
+    for hmiurl in aa.map_:
+        assert os.path.basename(hmiurl) == os.path.basename(aa.map_[hmiurl]['path'])
 
 @pytest.mark.online
 def test_invalid_query():

@@ -11,18 +11,25 @@
 """
 Attributes that can be used to construct HEK queries. They are different to
 the VSO ones in that a lot of them are wrappers that conveniently expose
-the comparisions by overloading Python operators. So, e.g., you are able
+the comparisons by overloading Python operators. So, e.g., you are able
 to say AR & AR.NumSpots < 5 to find all active regions with less than 5 spots.
 As with the VSO query, you can use the fundamental logic operators AND and OR
 to construct queries of almost arbitrary complexity. Note that complex queries
 result in multiple requests to the server which might make them less efficient.
 """
-
 from __future__ import absolute_import
 
 from datetime import datetime
 from sunpy.net import attr
 from sunpy.time import parse_time
+
+from sunpy.extern import six
+
+
+# Ugly hack for the deprecated apply decorator, this needs to be cleaned up
+def apply(f):
+    return f()
+
 
 class _ParamAttr(attr.Attr):
     """ A _ParamAttr is used to represent equality or inequality checks
@@ -74,7 +81,7 @@ class _ListAttr(attr.Attr):
         return vars(self) == vars(other)
 
     def __hash__(self):
-        return hash(tuple(vars(self).itervalues()))
+        return hash(tuple(six.itervalues(vars(self))))
 
 
 class EventType(attr.Attr):
@@ -109,7 +116,7 @@ class Time(attr.Attr):
         return vars(self) == vars(other)
 
     def __hash__(self):
-        return hash(tuple(vars(self).itervalues()))
+        return hash(tuple(six.itervalues(vars(self))))
 
     @classmethod
     def dt(cls, start, end):
@@ -118,8 +125,8 @@ class Time(attr.Attr):
 
 # pylint: disable=R0913
 class SpatialRegion(attr.Attr):
-    def __init__(
-        self, x1=-1200, y1=-1200, x2=1200, y2=1200, sys='helioprojective'):
+    def __init__(self, x1=-5000, y1=-5000, x2=5000, y2=5000,
+                 sys='helioprojective'):
         attr.Attr.__init__(self)
 
         self.x1 = x1
@@ -137,7 +144,7 @@ class SpatialRegion(attr.Attr):
         return vars(self) == vars(other)
 
     def __hash__(self):
-        return hash(tuple(vars(self).itervalues()))
+        return hash(tuple(six.itervalues(vars(self))))
 
 
 class Contains(attr.Attr):
@@ -154,7 +161,7 @@ class Contains(attr.Attr):
         return vars(self) == vars(other)
 
     def __hash__(self):
-        return hash(tuple(vars(self).itervalues()))
+        return hash(tuple(six.itervalues(vars(self))))
 
 
 class _ComparisonParamAttrWrapper(object):

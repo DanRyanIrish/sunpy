@@ -1,16 +1,17 @@
-from __future__ import absolute_import
+from __future__ import absolute_import, division, print_function
 
 __authors__ = ["Russell Hewett, Stuart Mumford"]
 __email__ = "stuart@mumford.me.uk"
 
 import os
 import glob
-import urllib2
+from collections import OrderedDict
 
 import numpy as np
+import astropy.io.fits
 
 import sunpy
-from sunpy.map import GenericMap
+from sunpy.map.mapbase import GenericMap, MAP_CLASSES
 from sunpy.map.header import MapMeta
 from sunpy.map.compositemap import CompositeMap
 from sunpy.map.mapcube import MapCube
@@ -25,6 +26,9 @@ from sunpy.util.datatype_factory_base import BasicRegistrationFactory
 from sunpy.util.datatype_factory_base import NoMatchError
 from sunpy.util.datatype_factory_base import MultipleMatchError
 from sunpy.util.datatype_factory_base import ValidationFunctionError
+from sunpy.extern import six
+
+from sunpy.extern.six.moves.urllib.request import urlopen
 
 # Make a mock DatabaseEntry class if sqlalchemy is not installed
 
@@ -39,7 +43,7 @@ __all__ = ['Map', 'MapFactory']
 class MapFactory(BasicRegistrationFactory):
     """
     Map(*args, **kwargs)
-    
+
     Map factory class.  Used to create a variety of Map objects.  Valid map types
     are specified by registering them with the factory.
 
@@ -47,47 +51,49 @@ class MapFactory(BasicRegistrationFactory):
     Examples
     --------
     >>> import sunpy.map
-    >>> mymap = sunpy.map.Map(sunpy.AIA_171_IMAGE)
+    >>> sunpy.data.download_sample_data(overwrite=False)   # doctest: +SKIP
+    >>> import sunpy.data.sample
+    >>> mymap = sunpy.map.Map(sunpy.data.sample.AIA_171_IMAGE)
 
     The SunPy Map factory accepts a wide variety of inputs for creating maps
 
     * Preloaded tuples of (data, header) pairs
 
-    >>> mymap = sunpy.map.Map((data, header))
+    >>> mymap = sunpy.map.Map((data, header))   # doctest: +SKIP
 
     headers are some base of `dict` or `collections.OrderedDict`, including `sunpy.io.header.FileHeader` or `sunpy.map.header.MapMeta` classes.
 
     * data, header pairs, not in tuples
 
-    >>> mymap = sunpy.map.Map(data, header)
+    >>> mymap = sunpy.map.Map(data, header)   # doctest: +SKIP
 
     * File names
 
-    >>> mymap = sunpy.map.Map('file1.fits')
+    >>> mymap = sunpy.map.Map('file1.fits')   # doctest: +SKIP
 
     * All fits files in a directory by giving a directory
 
-    >>> mymap = sunpy.map.Map('local_dir/sub_dir')
+    >>> mymap = sunpy.map.Map('local_dir/sub_dir')   # doctest: +SKIP
 
     * Some regex globs
 
-    >>> mymap = sunpy.map.Map('eit_*.fits')
+    >>> mymap = sunpy.map.Map('eit_*.fits')   # doctest: +SKIP
 
     * URLs
 
-    >>> mymap = sunpy.map.Map(url_str)
+    >>> mymap = sunpy.map.Map(url_str)   # doctest: +SKIP
 
     * DatabaseEntry
 
-    >>> mymap = sunpy.map.Map(db_result)
+    >>> mymap = sunpy.map.Map(db_result)   # doctest: +SKIP
 
     * Lists of any of the above
 
-    >>> mymap = sunpy.Map(['file1.fits', 'file2.fits', 'file3.fits', 'directory1/'])
+    >>> mymap = sunpy.map.Map(['file1.fits', 'file2.fits', 'file3.fits', 'directory1/'])   # doctest: +SKIP
 
     * Any mixture of the above not in a list
 
-    >>> mymap = sunpy.Map((data, header), data2, header2, 'file1.fits', url_str, 'eit_*.fits')
+    >>> mymap = sunpy.map.Map((data, header), data2, header2, 'file1.fits', url_str, 'eit_*.fits')   # doctest: +SKIP
     """
 
     def _read_file(self, fname, **kwargs):
@@ -109,10 +115,21 @@ class MapFactory(BasicRegistrationFactory):
                 new_pairs.append((data, meta))
         return new_pairs
 
+    def _validate_meta(self, meta):
+        """
+        Validate a meta argument.
+        """
+        if isinstance(meta, astropy.io.fits.header.Header):
+            return True
+        elif isinstance(meta, dict):
+            return True
+        else:
+            return False
+
     def _parse_args(self, *args, **kwargs):
         """
-        Parses an args list for data-header pairs.  args can contain any mixture
-        of the following entries:
+        Parses an args list for data-header pairs.  args can contain any
+        mixture of the following entries:
         * tuples of data,header
         * data, header not in a tuple
         * filename, which will be read
@@ -146,27 +163,30 @@ class MapFactory(BasicRegistrationFactory):
 
             # Data-header pair in a tuple
             if ((type(arg) in [tuple, list]) and
-                 len(arg) == 2 and
-                 isinstance(arg[0],np.ndarray) and
-                 isinstance(arg[1],dict)):
+                len(arg) == 2 and
+                isinstance(arg[0], np.ndarray) and
+                self._validate_meta(arg[1])):
+
+                arg[1] = OrderedDict(arg[1])
                 data_header_pairs.append(arg)
 
             # Data-header pair not in a tuple
             elif (isinstance(arg, np.ndarray) and
-                  isinstance(args[i+1],dict)):
-                pair = (args[i], args[i+1])
+                  self._validate_meta(args[i+1])):
+
+                pair = (args[i], OrderedDict(args[i+1]))
                 data_header_pairs.append(pair)
                 i += 1 # an extra increment to account for the data-header pairing
 
             # File name
-            elif (isinstance(arg,basestring) and
+            elif (isinstance(arg,six.string_types) and
                   os.path.isfile(os.path.expanduser(arg))):
                 path = os.path.expanduser(arg)
                 pairs = self._read_file(path, **kwargs)
                 data_header_pairs += pairs
 
             # Directory
-            elif (isinstance(arg,basestring) and
+            elif (isinstance(arg,six.string_types) and
                   os.path.isdir(os.path.expanduser(arg))):
                 path = os.path.expanduser(arg)
                 files = [os.path.join(path, elem) for elem in os.listdir(path)]
@@ -174,7 +194,7 @@ class MapFactory(BasicRegistrationFactory):
                     data_header_pairs += self._read_file(afile, **kwargs)
 
             # Glob
-            elif (isinstance(arg,basestring) and '*' in arg):
+            elif (isinstance(arg,six.string_types) and '*' in arg):
                 files = glob.glob( os.path.expanduser(arg) )
                 for afile in files:
                     data_header_pairs += self._read_file(afile, **kwargs)
@@ -184,7 +204,7 @@ class MapFactory(BasicRegistrationFactory):
                 already_maps.append(arg)
 
             # A URL
-            elif (isinstance(arg,basestring) and
+            elif (isinstance(arg,six.string_types) and
                   _is_url(arg)):
                 default_dir = sunpy.config.get("downloads", "download_dir")
                 url = arg
@@ -201,7 +221,7 @@ class MapFactory(BasicRegistrationFactory):
 
             i += 1
         #TODO:
-        # In the end, if there are aleady maps it should be put in the same
+        # In the end, if there are already maps it should be put in the same
         # order as the input, currently they are not.
         return data_header_pairs, already_maps
 
@@ -227,6 +247,10 @@ class MapFactory(BasicRegistrationFactory):
         silence_errors : boolean, optional
             If set, ignore data-header pairs which cause an exception.
 
+        Notes
+        -----
+        Extra keyword arguments are passed through to `sunpy.io.read_file` such
+        as `memmap` for FITS files.
         """
 
         # Hack to get around Python 2.x not backporting PEP 3102.
@@ -260,7 +284,7 @@ class MapFactory(BasicRegistrationFactory):
         if cube:
             return MapCube(new_maps, **kwargs)
 
-        # If the list is meant to be a composite mape, instantiate one
+        # If the list is meant to be a composite map, instantiate one
         if composite:
             return CompositeMap(new_maps, **kwargs)
 
@@ -287,7 +311,7 @@ class MapFactory(BasicRegistrationFactory):
             else:
                 candidate_widget_types = [self.default_widget_type]
         elif n_matches > 1:
-            raise MultipleMatchError("Too many candidate types idenfitied ({0}).  Specify enough keywords to guarantee unique type identification.".format(n_matches))
+            raise MultipleMatchError("Too many candidate types identified ({0}).  Specify enough keywords to guarantee unique type identification.".format(n_matches))
 
         # Only one is found
         WidgetType = candidate_widget_types[0]
@@ -297,7 +321,7 @@ class MapFactory(BasicRegistrationFactory):
 
 def _is_url(arg):
     try:
-        urllib2.urlopen(arg)
+        urlopen(arg)
     except:
         return False
     return True
@@ -319,3 +343,4 @@ class NoMapsFound(ValueError):
 
 Map = MapFactory(default_widget_type=GenericMap,
                  additional_validation_functions=['is_datasource_for'])
+Map.registry = MAP_CLASSES

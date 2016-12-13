@@ -3,7 +3,7 @@
 import sunpy
 import sunpy.map
 #==============================================================================
-# Test, read, get_header and write through the file independant layer
+# Test, read, get_header and write through the file independent layer
 #==============================================================================
 class TestMapMeta(object):
 
@@ -14,7 +14,7 @@ class TestMapMeta(object):
         #get
         assert meta.get('wibble') == meta.get('WIBBLE')
         #has_key
-        assert meta.has_key('wibble') == meta.has_key('WIBBLE')
+        assert ('wibble' in meta) == ('WIBBLE' in meta)
         #Copy
         meta2 = meta.copy()
         assert meta2 == meta

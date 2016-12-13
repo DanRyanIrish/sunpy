@@ -12,29 +12,61 @@ from pandas import DataFrame
 
 from sunpy.lightcurve import LightCurve
 from sunpy.time import parse_time, TimeRange, is_time_in_given_format
+from sunpy.util import net
 
 __all__ = ['GOESLightCurve']
 
 
 class GOESLightCurve(LightCurve):
     """
-    GOES X-ray LightCurve. Provides GOES data back to 1981-01-01.
-    Most recent data is usually available one or two days late.
+    GOES XRS LightCurve
+
+    Each GOES satellite there are two X-ray Sensors (XRS) which provide solar X
+    ray fluxes for the wavelength bands of 0.5 to 4 Å (short channel)
+    and 1 to 8 Å (long channel). Most recent data is usually available one or two days late.
+
+    Data is available starting on 1981/01/01.
 
     Examples
     --------
     >>> from sunpy import lightcurve as lc
     >>> from sunpy.time import TimeRange
     >>> goes = lc.GOESLightCurve.create(TimeRange('2012/06/01', '2012/06/05'))
-    >>> goes.peek()
+    >>> goes.peek()   # doctest: +SKIP
 
     References
     ----------
-    | http://umbra.nascom.nasa.gov/goes/fits/
+    * `GOES Mission Homepage <http://www.goes.noaa.gov>`_
+    * `GOES XRS Homepage <http://www.swpc.noaa.gov/products/goes-x-ray-flux>`_
+    * `GOES XRS Guide <http://ngdc.noaa.gov/stp/satellite/goes/doc/GOES_XRS_readme.pdf>`_
+    * `NASCOM Data Archive <http://umbra.nascom.nasa.gov/goes/fits/>`_
     """
 
     def peek(self, title="GOES Xray Flux"):
-        """Plots GOES light curve is the usual manner"""
+        """Plots GOES XRS light curve is the usual manner. An example is shown
+        below.
+
+        .. plot::
+
+            from sunpy import lightcurve as lc
+            from sunpy.data.sample import GOES_LIGHTCURVE
+            goes = lc.GOESLightCurve.create(GOES_LIGHTCURVE)
+            goes.peek()
+
+        Parameters
+        ----------
+        title : str
+            The title of the plot.
+
+        **kwargs : dict
+            Any additional plot arguments that should be used
+            when plotting.
+
+        Returns
+        -------
+        fig : `~matplotlib.Figure`
+            A plot figure.
+        """
         figure = plt.figure()
         axes = plt.gca()
 
@@ -73,11 +105,14 @@ class GOESLightCurve(LightCurve):
 
     @classmethod
     def _get_default_uri(cls):
-        """Retrieve latest GOES data if no other data is specified"""
-        today = datetime.datetime.today()
-        days_back = 3
-        time_range = TimeRange(today - datetime.timedelta(days=days_back),
-                               today - datetime.timedelta(days=days_back - 1))
+        """Returns the URL for the latest GOES data."""
+        now = datetime.datetime.utcnow()
+        time_range = TimeRange(datetime.datetime(now.year, now.month, now.day), now)
+        url_does_exist = net.url_exists(cls._get_url_for_date_range(time_range))
+        while not url_does_exist:
+            time_range = TimeRange(time_range.start-datetime.timedelta(days=1),
+                                   time_range.start)
+            url_does_exist = net.url_exists(cls._get_url_for_date_range(time_range))
         return cls._get_url_for_date_range(time_range)
 
     @classmethod
@@ -85,25 +120,25 @@ class GOESLightCurve(LightCurve):
         """Parses the query time to determine which GOES satellite to use."""
 
         goes_operational = {
-        2: TimeRange('1981-01-01', '1983-04-30'),
-        5: TimeRange('1983-05-02', '1984-07-31'),
-        6: TimeRange('1983-06-01', '1994-08-18'),
-        7: TimeRange('1994-01-01', '1996-08-13'),
-        8: TimeRange('1996-03-21', '2003-06-18'),
-        9: TimeRange('1997-01-01', '1998-09-08'),
-        10: TimeRange('1998-07-10', '2009-12-01'),
-        11: TimeRange('2006-06-20', '2008-02-15'),
-        12: TimeRange('2002-12-13', '2007-05-08'),
+        2: TimeRange('1980-01-04', '1983-05-01'),
+        5: TimeRange('1983-05-02', '1984-08-01'),
+        6: TimeRange('1983-06-01', '1994-08-19'),
+        7: TimeRange('1994-01-01', '1996-08-14'),
+        8: TimeRange('1996-03-21', '2003-06-19'),
+        9: TimeRange('1997-01-01', '1998-09-09'),
+        10: TimeRange('1998-07-10', '2009-12-02'),
+        11: TimeRange('2006-06-20', '2008-02-16'),
+        12: TimeRange('2002-12-13', '2007-05-09'),
         13: TimeRange('2006-08-01', '2006-08-01'),
-        14: TimeRange('2009-12-02', '2010-10-04'),
+        14: TimeRange('2009-12-02', '2010-11-05'),
         15: TimeRange('2010-09-01', datetime.datetime.utcnow())}
 
         sat_list = []
         for sat_num in goes_operational:
-            if ((start > goes_operational[sat_num].start and
-                 start < goes_operational[sat_num].end and
-                (end > goes_operational[sat_num].start and
-                 end < goes_operational[sat_num].end))):
+            if ((start >= goes_operational[sat_num].start and
+                 start <= goes_operational[sat_num].end and
+                (end >= goes_operational[sat_num].start and
+                 end <= goes_operational[sat_num].end))):
                 # if true then the satellite with sat_num is available
                 sat_list.append(sat_num)
 
@@ -119,12 +154,12 @@ class GOESLightCurve(LightCurve):
 
         Parameters
         ----------
-        args : TimeRange, datetimes, date strings
+        args : `~sunpy.time.TimeRange`, `datetime.datetime`, str
             Date range should be specified using a TimeRange, or start
             and end dates at datetime instances or date strings.
         satellite_number : int
             GOES satellite number (default = 15)
-        data_type : string
+        data_type : str
             Data type to return for the particular GOES satellite. Supported
             types depend on the satellite number specified. (default = xrs_2s)
         """
@@ -186,5 +221,5 @@ class GOESLightCurve(LightCurve):
         newxrsb = xrsb.byteswap().newbyteorder()
 
         data = DataFrame({'xrsa': newxrsa, 'xrsb': newxrsb}, index=times)
-
+        data.sort_index(inplace=True)
         return header, data

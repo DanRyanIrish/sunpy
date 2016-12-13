@@ -21,12 +21,13 @@ from datetime import datetime
 
 from astropy import units as u
 
-from sunpy.time import TimeRange
+from sunpy.time import TimeRange as _TimeRange
 from sunpy.net.attr import (
     Attr, AttrWalker, AttrAnd, AttrOr, DummyAttr, ValueAttr
 )
 from sunpy.util.multimethod import MultiMethod
 from sunpy.time import parse_time
+from sunpy.extern.six import iteritems
 
 __all__ = ['Wave', 'Time', 'Extent', 'Field', 'Provider', 'Source',
            'Instrument', 'Physobs', 'Pixels', 'Level', 'Resolution',
@@ -62,8 +63,8 @@ class Wave(Attr, _Range):
 
         # VSO just accept inputs as Angstroms, kHz or keV, the following
         # converts to any of these units depending on the spectral inputs
-        # Note: the website asks for GHz, however it seems that using GHz produces
-        # weird responses on VSO.
+        # Note: the website asks for GHz, however it seems that using GHz
+        # produces weird responses on VSO.
         convert = {'m': u.AA, 'Hz': u.kHz, 'eV': u.keV}
         for k in convert.keys():
             if wavemin.decompose().unit == (1 * u.Unit(k)).decompose().unit:
@@ -82,16 +83,34 @@ class Wave(Attr, _Range):
         return isinstance(other, self.__class__)
 
     def __repr__(self):
-	return "<Wave({0!r}, {1!r}, '{2!s}')>".format(self.min.value,
-                                                self.max.value,
-                                                self.unit)
+        return "<Wave({0!r}, {1!r}, '{2!s}')>".format(self.min.value,
+                                                      self.max.value,
+                                                      self.unit)
 
 
 class Time(Attr, _Range):
+    """
+    Specify the time range of the query.
+
+    Parameters
+    ----------
+
+    start : SunPy Time String or `~sunpy.time.TimeRange`.
+        The start time in a format parseable by `~sunpy.time.parse_time` or
+        a `sunpy.time.TimeRange` object.
+
+    end : SunPy Time String
+        The end time of the range.
+
+    near: SunPy Time String
+        Return a singular record closest in time to this value as possible,
+        inside the start and end window. Note: not all providers support this.
+
+    """
     def __init__(self, start, end=None, near=None):
-        if end is None and not isinstance(start, TimeRange):
+        if end is None and not isinstance(start, _TimeRange):
             raise ValueError("Specify start and end or start has to be a TimeRange")
-        if isinstance(start, TimeRange):
+        if isinstance(start, _TimeRange):
             self.start = start.start
             self.end = start.end
         else:
@@ -193,7 +212,19 @@ class Filter(_VSOSimpleAttr):
 
 
 class Sample(_VSOSimpleAttr):
-    pass
+    """
+    Time interval for data sampling.
+
+    Parameters
+    ----------
+
+    value : `astropy.units.Quantity`
+        A sampling rate convertible to seconds.
+    """
+    @u.quantity_input(value=u.s)
+    def __init__(self, value):
+        super(Sample, self).__init__(value)
+        self.value = value.to(u.s).value
 
 
 class Quicklook(_VSOSimpleAttr):
@@ -225,7 +256,7 @@ def _create(wlk, root, api):
 # pylint: disable=E0102,C0103,W0613
 def _apply(wlk, root, api, queryblock):
     """ Implementation detail. """
-    for k, v in root.attrs.iteritems():
+    for k, v in iteritems(root.attrs):
         lst = k[-1]
         rest = k[:-1]
 
@@ -257,7 +288,7 @@ def _create(wlk, root, api):
 # attrs member.
 walker.add_converter(Extent)(
     lambda x: ValueAttr(
-        dict((('extent', k), v) for k, v in vars(x).iteritems())
+        dict((('extent', k), v) for k, v in iteritems(vars(x)))
     )
 )
 
@@ -317,7 +348,7 @@ def _(attr, results):
     attrname = attr.__class__.__name__.lower()
     return set(
         item for item in results
-        # Some servers seem to obmit some fields. No way to filter there.
+        # Some servers seem to omit some fields. No way to filter there.
         if not hasattr(item, attrname) or
         getattr(item, attrname).lower() == attr.value.lower()
     )

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Author: Florian Mayer <florian.mayer@bitsrc.org>
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 from datetime import datetime
 import pytest
@@ -10,9 +10,9 @@ import numpy as np
 
 from numpy.testing import assert_array_almost_equal
 
-from sunpy.spectra.spectrogram import(
-    Spectrogram, LinearTimeSpectrogram, _LinearView
-)
+from sunpy.spectra.spectrogram import (Spectrogram, LinearTimeSpectrogram,
+                                       _LinearView)
+from sunpy.extern.six.moves import range
 
 
 def is_linear(arr):
@@ -178,7 +178,7 @@ def test_join():
     z = LinearTimeSpectrogram.join_many(
         [one, other], nonlinear=False, maxgap=0
     )
-    # The - 1 is because resampling other procuces an image of size
+    # The - 1 is because resampling other produces an image of size
     # 2 * 3600 - 1
     # The - 2 is because there is one second overlap.
     assert z.shape == (200, 3 * 3600 - 2 - 1)
@@ -254,7 +254,7 @@ def test_join_midnight():
     z = LinearTimeSpectrogram.join_many(
         [one, other], nonlinear=False, maxgap=0
     )
-    # The - 1 is because resampling other procuces an image of size
+    # The - 1 is because resampling other produces an image of size
     # 2 * 3600 - 1
     assert z.shape == (200, 3 * 3600 - 1)
 
@@ -282,7 +282,7 @@ def test_join_month():
     z = LinearTimeSpectrogram.join_many(
         [one, other], nonlinear=False, maxgap=0
     )
-    # The - 1 is because resampling other procuces an image of size
+    # The - 1 is because resampling other produces an image of size
     # 2 * 3600 - 1
     assert z.shape == (200, 3 * 3600 - 1)
 
@@ -310,7 +310,7 @@ def test_join_year():
     z = LinearTimeSpectrogram.join_many(
         [one, other], nonlinear=False, maxgap=0
     )
-    # The - 1 is because resampling other procuces an image of size
+    # The - 1 is because resampling other produces an image of size
     # 2 * 3600 - 1
     assert z.shape == (200, 3 * 3600 - 1)
 
@@ -340,7 +340,7 @@ def test_join_over_midnight():
     # FIXME: not used?!
     oz = other.resample_time(0.5)
 
-    # The - 1 is because resampling other procuces an image of size
+    # The - 1 is because resampling other produces an image of size
     # 2 * 3600 - 1
     assert z.shape == (200, 3 * 3600 - 1)
 
@@ -370,8 +370,7 @@ def test_join_gap():
         LinearTimeSpectrogram.join_many(
             [one, other], nonlinear=False, maxgap=0
         )
-
-    assert excinfo.value.message == "Too large gap."
+        assert excinfo.value.message == "Too large gap."
 
 
 def test_join_with_gap():
@@ -425,14 +424,14 @@ def test_join_with_gap_fill():
     z = LinearTimeSpectrogram.join_many(
         [one, other], nonlinear=False, maxgap=2, fill=np.NaN
     )
-    # The - 1 is because resampling other procuces an image of size
+    # The - 1 is because resampling other produces an image of size
     # 2 * 3600 - 1
     # The + 2 is because there is one second without data inserted.
     assert z.shape == (200, 3 * 3600 + 2 - 1)
 
     assert np.array_equal(z.data[:, :3600], one.data)
 
-    print type(z.data)
+    print(type(z.data))
 
     # Second data to unpack masked array
     assert np.isnan(z.data.data[:, 3600:3602]).all()
@@ -463,7 +462,7 @@ def test_join_nonlinear():
         [one, other], nonlinear=True, maxgap=2
     )
 
-    # The - 1 is because resampling other procuces an image of size
+    # The - 1 is because resampling other produces an image of size
     # 2 * 3600 - 1
     assert z.shape == (200, 3 * 3600 - 1)
 
@@ -510,10 +509,9 @@ def test_rescale_error():
 
     with pytest.raises(ValueError) as excinfo:
         spec.rescale(0, 1)
-    assert (
-        excinfo.value.message ==
-        "Spectrogram needs to contain distinct values."
-    )
+        assert (
+            excinfo.value.message ==
+            "Spectrogram needs to contain distinct values.")
 
 
 def test_rescale_error2():
@@ -527,7 +525,8 @@ def test_rescale_error2():
 
     with pytest.raises(ValueError) as excinfo:
         spec.rescale(1, 1)
-    assert excinfo.value.message == "Maximum and minimum must be different."
+        assert (excinfo.value.message ==
+                "Maximum and minimum must be different.")
 
 
 def test_resample():
@@ -577,7 +576,7 @@ def test_combine_freqs():
 
     # print comb
 
-    for freq in xrange(10):
+    for freq in range(10):
         assert np.array_equal(
             comb[9 - freq, :], stuff[freq % 2][4 - freq // 2, :]
         )
@@ -605,7 +604,7 @@ def test_join_diff_freq():
 
     with pytest.raises(ValueError) as excinfo:
         LinearTimeSpectrogram.join_many([spec, spec2])
-    assert excinfo.value.message == "Frequency channels do not match."
+        assert excinfo.value.message == "Frequency channels do not match."
 
 
 def test_intersect_time():

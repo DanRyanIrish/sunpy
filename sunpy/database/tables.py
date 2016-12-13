@@ -2,16 +2,15 @@
 #
 # This module was developed with funding provided by
 # the Google Summer of Code (2013).
-
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 from time import strptime, mktime
 from datetime import datetime
 import fnmatch
 import os
-from itertools import imap
 
 from astropy.units import Unit, nm, equivalencies
+import astropy.table
 from sqlalchemy import Column, Integer, Float, String, DateTime, Boolean,\
     Table, ForeignKey
 from sqlalchemy.orm import relationship
@@ -20,8 +19,12 @@ from sqlalchemy.ext.declarative import declarative_base
 from sunpy.time import parse_time
 from sunpy.io import fits, file_tools as sunpy_filetools
 from sunpy.util import print_table
+from sunpy.extern.six.moves import map
+from sunpy.extern import six
 
 from sunpy import config
+
+
 TIME_FORMAT = config.get("general", "time_format")
 
 __all__ = [
@@ -110,6 +113,9 @@ class FitsHeaderEntry(Base):
             self.key == other.key and
             self.value == other.value)
 
+    def __hash__(self):
+        return super(FitsHeaderEntry, self).__hash__()
+
     def __ne__(self, other):
         return not (self == other)
 
@@ -136,6 +142,13 @@ class FitsKeyComment(Base):
             self.key == other.key and
             self.value == other.value)
 
+    def __lt__(self, other):
+        return ('{0}, {1}'.format(self.key, self.value) <
+                '{0}, {1}'.format(other.key, other.value))
+
+    def __hash__(self):
+        return super(FitsKeyComment, self).__hash__()
+
     def __ne__(self, other):
         return not (self == other)
 
@@ -154,6 +167,9 @@ class Tag(Base):
 
     def __eq__(self, other):
         return self.name == other.name
+
+    def __hash__(self):
+        return super(Tag, self).__hash__()
 
     def __ne__(self, other):
         return not (self == other)
@@ -259,11 +275,12 @@ class DatabaseEntry(Base):
         Examples
         --------
         >>> from sunpy.net import vso
+        >>> from sunpy.database.tables import DatabaseEntry
         >>> client = vso.VSOClient()
         >>> qr = client.query(
         ...     vso.attrs.Time('2001/1/1', '2001/1/2'),
         ...     vso.attrs.Instrument('eit'))
-        >>> entry = DatabaseEntry.from_query_result_block(qr[0])
+        >>> entry = DatabaseEntry._from_query_result_block(qr[0])
         >>> entry.source
         'SOHO'
         >>> entry.provider
@@ -283,6 +300,8 @@ class DatabaseEntry(Base):
 
         """
         time_start = timestamp2datetime('%Y%m%d%H%M%S', qr_block.time.start)
+        if not qr_block.time.end:
+            qr_block.time.end = qr_block.time.start
         time_end = timestamp2datetime('%Y%m%d%H%M%S', qr_block.time.end)
         wave = qr_block.wave
         unit = None
@@ -346,6 +365,9 @@ class DatabaseEntry(Base):
             self.fits_header_entries == other.fits_header_entries and
             self.tags == other.tags)
 
+    def __hash__(self):
+        return super(DatabaseEntry, self).__hash__()
+
     def __ne__(self, other):  # pragma: no cover
         return not (self == other)
 
@@ -381,7 +403,7 @@ def entries_from_query_result(qr, default_waveunit=None):
     Examples
     --------
     >>> from sunpy.net import vso
-    >>> from sunpy.database import entries_from_query_result
+    >>> from sunpy.database.tables import entries_from_query_result
     >>> client = vso.VSOClient()
     >>> qr = client.query(
     ...     vso.attrs.Time('2001/1/1', '2001/1/2'),
@@ -446,6 +468,10 @@ def entries_from_file(file, default_waveunit=None):
 
     Examples
     --------
+    >>> from sunpy.database.tables import entries_from_file
+    >>> import sunpy.data
+    >>> sunpy.data.download_sample_data(overwrite=False)   # doctest: +SKIP
+    >>> import sunpy.data.sample
     >>> entries = list(entries_from_file(sunpy.data.sample.SWAP_LEVEL1_IMAGE))
     >>> len(entries)
     1
@@ -457,24 +483,24 @@ def entries_from_file(file, default_waveunit=None):
     >>> entry.wavemin, entry.wavemax
     (17.400000000000002, 17.400000000000002)
     >>> len(entry.fits_header_entries)
-    112
+    111
 
     """
     headers = fits.get_header(file)
-    if isinstance(file, (str, unicode)):
+    if isinstance(file, (str, six.text_type)):
         filename = file
     else:
         filename = getattr(file, 'name', None)
     for header in headers:
         entry = DatabaseEntry(path=filename)
-        for key, value in header.iteritems():
+        for key, value in six.iteritems(header):
             # Yes, it is possible to have an empty key in a FITS file.
             # Example: sunpy.data.sample.EIT_195_IMAGE
             # Don't ask me why this could be a good idea.
             if key == '':
                 value = str(value)
             elif key == 'KEYCOMMENTS':
-                for k, v in value.iteritems():
+                for k, v in six.iteritems(value):
                     entry.fits_key_comments.append(FitsKeyComment(k, v))
                 continue
             entry.fits_header_entries.append(FitsHeaderEntry(key, value))
@@ -544,23 +570,15 @@ def entries_from_dir(fitsdir, recursive=False, pattern='*',
 
     Examples
     --------
-    >>> from pprint import pprint
     >>> from sunpy.data.test import rootdir as fitsdir
-    >>> entries = list(entries_from_dir(fitsdir))
+    >>> from sunpy.database.tables import entries_from_dir
+    >>> entries = list(entries_from_dir(fitsdir, default_waveunit='angstrom'))
     >>> len(entries)
-    2
+    38
     >>> # and now search `fitsdir` recursive
-    >>> entries = list(entries_from_dir(fitsdir, True))
+    >>> entries = list(entries_from_dir(fitsdir, True, default_waveunit='angstrom'))
     >>> len(entries)
-    15
-    >>> # print the first 5 items of the FITS header of the first found file
-    >>> first_entry, filename = entries[0]
-    >>> pprint(first_entry.fits_header_entries[:5])
-    [<FitsHeaderEntry(id None, key 'SIMPLE', value True)>,
-     <FitsHeaderEntry(id None, key 'BITPIX', value -64)>,
-     <FitsHeaderEntry(id None, key 'NAXIS', value 2)>,
-     <FitsHeaderEntry(id None, key 'NAXIS1', value 128)>,
-     <FitsHeaderEntry(id None, key 'NAXIS2', value 128)>]
+    59
 
     """
     for dirpath, dirnames, filenames in os.walk(fitsdir):
@@ -579,7 +597,7 @@ def entries_from_dir(fitsdir, recursive=False, pattern='*',
             break
 
 
-def display_entries(database_entries, columns):
+def _create_display_table(database_entries, columns=None, sort=False):
     """Generate a table to display the database entries.
 
     Parameters
@@ -591,15 +609,21 @@ def display_entries(database_entries, columns):
         The columns that will be displayed in the resulting table. Possible
         values for the strings are all attributes of :class:`DatabaseEntry`.
 
+    sort : bool (optional)
+        If True, sorts the entries before displaying them.
+
     Returns
     -------
     str
-        A formatted table that can be printed on the console or written to a
+        An astropy table that can be printed on the console or written to a
         file.
 
     """
-    header = [columns]
-    rulers = [['-' * len(col) for col in columns]]
+    if columns is None:
+        columns = ['id', 'observation_time_start', 'observation_time_end',
+                    'instrument', 'source', 'provider', 'physobs', 'wavemin',
+                    'wavemax', 'path', 'fileid', 'tags', 'starred',
+                    'download_time', 'size']
     data = []
     for entry in database_entries:
         row = []
@@ -607,7 +631,7 @@ def display_entries(database_entries, columns):
             if col == 'starred':
                 row.append('Yes' if entry.starred else 'No')
             elif col == 'tags':
-                row.append(', '.join(imap(str, entry.tags)) or 'N/A')
+                row.append(', '.join(map(str, entry.tags)) or 'N/A')
             # do not display microseconds in datetime columns
             elif col in (
                     'observation_time_start',
@@ -626,4 +650,25 @@ def display_entries(database_entries, columns):
         data.append(row)
     if not data:
         raise TypeError('given iterable is empty')
-    return print_table(header + rulers + data)
+    if sort:
+        data.sort()
+    return astropy.table.Table(rows=data, names=columns)
+
+
+def display_entries(database_entries, columns=None, sort=False):
+    """Print a table to display the database entries.
+
+    Parameters
+    ----------
+    database_entries : iterable of :class:`DatabaseEntry` instances
+        The database entries will be the rows in the resulting table.
+
+    columns : iterable of str
+        The columns that will be displayed in the resulting table. Possible
+        values for the strings are all attributes of :class:`DatabaseEntry`.
+
+    sort : bool (optional)
+        If True, sorts the entries before displaying them.
+
+    """
+    return _create_display_table(database_entries, columns, sort).__str__()
