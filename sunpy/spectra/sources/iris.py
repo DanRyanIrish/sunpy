@@ -11,8 +11,8 @@ from astropy.units.quantity import Quantity
 from astropy.table import Table, vstack
 
 from sunpy.time import parse_time
-
 #from sunpy.spectra.spectrum import SlitSpectrum
+
 import imp
 import os.path
 spectrum = imp.load_source(
@@ -20,7 +20,8 @@ spectrum = imp.load_source(
                              "sunpy", "spectra", "spectrum.py"))
 from spectrum import SlitSpectrum
 
-class IRISSpectrum():
+
+class IRISSpectrum:
     """A class to handle IRIS spectrograph data.
 
     Attributes
@@ -140,11 +141,11 @@ class IRISSpectrum():
                 # Raise error if file not part of same OBS.
                 if hdulist[0].header["STARTOBS"] != self.meta["observation_start"]:
                     raise IOError(
-                        "Files must be part of same observation. Current file has different " + \
-                        "OBS start time from first file.\n" + \
-                        "First file: {0}\n".format(filenames[0]) + \
-                        "Current file: {0}\n".format(filename) + \
-                        "OBS start time of first file: {0}\n".format(self.meta["observation_start"]) + \
+                        "Files must be part of same observation. Current file has different " +
+                        "OBS start time from first file.\n" +
+                        "First file: {0}\n".format(filenames[0]) +
+                        "Current file: {0}\n".format(filename) +
+                        "OBS start time of first file: {0}\n".format(self.meta["observation_start"]) +
                         "OBS start time of current file: {0}".format(hdulist[0].header["STARTOBS"])
                         )
                 self._meta.append([hdu.header for hdu in hdulist])
@@ -167,7 +168,7 @@ class IRISSpectrum():
                                data[i], time_axis,
                                self._get_axis("slit", self.spectral_windows["name"][i]),
                                self._get_axis("spectral", self.spectral_windows["name"][i])))
-            for i in range(self.meta["n_spectral_windows"])])
+                          for i in range(self.meta["n_spectral_windows"])])
         # Attach auxilary data and level1 info to object.
         self.auxilary_data = auxilary_data
         self.level1_info = level1_info
@@ -197,8 +198,8 @@ class IRISSpectrum():
             raise ValueError("axis_type must be 'spectral', 'slit', 'raster' or 'time'.")
         window_index = np.where(self.spectral_windows["name"] == spectral_window)[0][0]+1
         header = self._meta[0][window_index]
-        axis = Quantity(header["CRVAL{0}".format(axis_index)] + \
-                        header["CDELT{0}".format(axis_index)] * \
+        axis = Quantity(header["CRVAL{0}".format(axis_index)] +
+                        header["CDELT{0}".format(axis_index)] *
                         np.arange(0, header["NAXIS{0}".format(axis_index)]),
                         header["CUNIT{0}".format(axis_index)])
         return axis
