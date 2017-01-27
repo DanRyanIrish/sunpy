@@ -210,3 +210,110 @@ class IRISSpectrum:
                         np.arange(0, header["NAXIS{0}".format(axis_index)]),
                         header["CUNIT{0}".format(axis_index)])
         return axis
+
+
+class IRISRaster:
+    """A class to handle data from an IRIS spectrograph file.
+
+    Attributes
+    ----------
+    data : `dict`
+        dictionary of `spectral_cube.SpectralCube` objects. One for each spectral window.
+    auxilary_data : `astropy.table.Table`
+       Auxilary data from penultimate FITS extension of IRIS FITS file.
+    level1_info : `numpy.recarray`
+       Additional data from last FITS extension of IRIS FITS file including
+       level 1 file names from which data was derived.
+    meta : `dict`
+        Useful metadata made easily accessible.
+
+    Parameters
+    ----------
+    filename : `str`
+        Filename from which to read data into object.
+
+    """
+
+    def __init__(self, filename):
+        """Initialize an IRISRaster object."""
+        # Open file.
+        hdulist = fits.open(filename)
+        # Define indices of hdulist containing primary data.
+        window_fits_indices = range(1, len(hdulist)-2)
+        # Create table of spectral window info in OBS.
+        self.spectral_windows = Table([
+            [hdulist[0].header["TDESC{0}".format(i)] for i in window_fits_indices],
+            [hdulist[0].header["TDET{0}".format(i)] for i in window_fits_indices],
+            Quantity([hdulist[0].header["TWAVE{0}".format(i)] for i in window_fits_indices], unit="angstrom"),
+            Quantity([hdulist[0].header["TWMIN{0}".format(i)] for i in window_fits_indices], unit="angstrom"),
+            Quantity([hdulist[0].header["TWMAX{0}".format(i)] for i in window_fits_indices], unit="angstrom")],
+            names=("name", "detector type", "brightest wavelength", "min wavelength", "max wavelength"))
+        # Put data into dict with each entry representing a spectral window
+        self.data = dict([(self.spectral_windows["name"][i],
+                           SpectralCube(data=np.array(hdulist[j].data), wcs=wcs.WCS(hdulist[j].header)))
+                          for i, j in enumerate(window_fits_indices)])
+        # Attach auxiliary data.
+        self.auxilary_data = Table(rows=hdulist[-2].data, names=hdulist[-2].header[7:])
+        # Attach level 1 info
+        self.level1_info = np.array(hdulist[-1].data)
+        # Put useful metadata into meta attribute.
+        self.meta = {"date data created": parse_time(hdulist[0].header["DATE"]),
+                     "telescope": hdulist[0].header["TELESCOP"],
+                     "instrument": hdulist[0].header["INSTRUME"],
+                     "data level": hdulist[0].header["DATA_LEV"],
+                     "level 2 reformatting version": hdulist[0].header["VER_RF2"],
+                     "level 2 reformatting date": parse_time(hdulist[0].header["DATE_RF2"]),
+                     "data_src": hdulist[0].header["DATA_SRC"],
+                     "origin": hdulist[0].header["origin"],
+                     "build version": hdulist[0].header["BLD_VERS"],
+                     "look-up table ID": hdulist[0].header["LUTID"],
+                     "observation ID": int(hdulist[0].header["OBSID"]),
+                     "observation description": hdulist[0].header["OBS_DESC"],
+                     "observation label": hdulist[0].header["OBSLABEL"],
+                     "observation title": hdulist[0].header["OBSTITLE"],
+                     "observation start": hdulist[0].header["STARTOBS"],
+                     "observation end": hdulist[0].header["ENDOBS"],
+                     "observation repetitions": hdulist[0].header["OBSREP"],
+                     "camera": hdulist[0].header["CAMERA"],
+                     "status": hdulist[0].header["STATUS"],
+                     "data quantity": hdulist[0].header["BTYPE"],
+                     "data unit": hdulist[0].header["BUNIT"],
+                     "BSCALE": hdulist[0].header["BSCALE"],
+                     "BZERO": hdulist[0].header["BZERO"],
+                     "high latitude flag": hdulist[0].header["HLZ"],
+                     "SAA": bool(int(hdulist[0].header["SAA"])),
+                     "satellite roll angle": Quantity(float(hdulist[0].header["SAT_ROT"]), unit=u.deg),
+                     "AEC exposures in OBS": hdulist[0].header["AECNOBS"],
+                     "dsun": Quantity(hdulist[0].header["DSUN_OBS"], unit="m"),
+                     "IAECEVFL": bool(),
+                     "IAECFLAG": bool(),
+                     "IAECFLFL": bool(),
+                     "FOV Y axis": Quantity(float(hdulist[0].header["FOVY"]), unit="arcsec"),
+                     "FOV X axis": Quantity(float(hdulist[0].header["FOVX"]), unit="arcsec"),
+                     "FOV center Y axis": Quantity(float(hdulist[0].header["YCEN"]), unit="arcsec"),
+                     "FOV center X axis": Quantity(float(hdulist[0].header["XCEN"]), unit="arcsec"),
+                     "spectral summing NUV": hdulist[0].header["SUMSPTRN"],
+                     "spectral summing FUV": hdulist[0].header["SUMSPTRF"],
+                     "spatial summing": hdulist[0].header["SUMSPAT"],
+                     "exposure time mean": hdulist[0].header["EXPTIME"],
+                     "exposure time min": hdulist[0].header["EXPMIN"],
+                     "exposure time max": hdulist[0].header["EXPMAX"],
+                     "total exposures in OBS": hdulist[0].header["NEXPOBS"],
+                     "number unique raster positions": hdulist[0].header["NRASTERP"],
+                     "raster step size mean": hdulist[0].header["STEPS_AV"],
+                     "raster step size sigma": hdulist[0].header["STEPS_DV"],
+                     "time step size mean": hdulist[0].header["STEPT_AV"],
+                     "time step size sigma": hdulist[0].header["STEPT_DV"],
+                     "number spectral windows": hdulist[0].header["NWIN"]}
+        # Translate some metadata to be more helpful.
+        if hdulist[0].header["IAECEVFL"] == "YES":
+            self.meta["IAECEVFL"] = True
+        if hdulist[0].header["IAECFLAG"] == "YES":
+            self.meta["IAECFLAG"] = True
+        if hdulist[0].header["IAECFLFL"] == "YES":
+            self.meta["IAECFLFL"] = True
+        if self.meta["data level"] == 2.:
+            if self.meta["camera"] == 1:
+                self.meta["camera"] = "spectra"
+            elif self.meta["camera"] == 2:
+                self.meta["camera"] = "SJI"
