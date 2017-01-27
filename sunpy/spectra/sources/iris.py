@@ -9,6 +9,8 @@ from astropy.io import fits
 import astropy.units as u
 from astropy.units.quantity import Quantity
 from astropy.table import Table, vstack
+from astropy import wcs
+from spectral_cube import SpectralCube
 
 from sunpy.time import parse_time
 #from sunpy.spectra.spectrum import SlitSpectrum
@@ -70,7 +72,7 @@ class IRISSpectrum:
                     Maximum wavelength in spectral window.
 
     """
-    def __init__(self, filenames, windows="All"):
+    def __init__(self, filenames, spectral_windows="All"):
         """
         Initialises an IRISSpectrum object from a list of filenames.
 
@@ -79,7 +81,7 @@ class IRISSpectrum:
         filenames : `str` or iterable of strings, e.g. list, tuple etc.
             Filenames from which to read data into object.  Filenames must be from
             the same IRIS observing campaign, i.e. have the same OBS start time.
-        windows : "All" or iterable of strings, , e.g. list, tuple etc.
+        spectral_windows : "All" or iterable of strings, , e.g. list, tuple etc.
             Spectral windows to be read into object. Default="All". If not default,
             must be an iterable of strings of the window names:
             "C II 1336", "O I 1356", "Si IV 1394", "Si IV 1403", "2832", "2814",
@@ -102,27 +104,34 @@ class IRISSpectrum:
                      "dsun": Quantity(hdulist[0].header["DSUN_OBS"], unit="m"),
                      "observation_start": hdulist[0].header["STARTOBS"],
                      "observation_end": hdulist[0].header["ENDOBS"],
-                     "n_spectral_windows": int(hdulist[0].header["NWIN"]),
-                     "satellite_roll_angle": Quantity(
-                         float(hdulist[0].header["SAT_ROT"]), unit=u.deg)}
-        # Extract information on spectral windows.
+                     "satellite_roll_angle": Quantity(float(hdulist[0].header["SAT_ROT"]), unit=u.deg)}
+        n_spectral_windows = int(hdulist[0].header["NWIN"])
+        # Check user desired spectral windows are in file.
+        windows_in_obs = np.array([hdulist[0].header["TDESC{0}".format(i)] for i in range(1, n_spectral_windows+1)])
+        if spectral_windows == "All":
+            spectral_windows = windows_in_obs
+        else:
+            spectral_windows = np.asarray(spectral_windows, dtype="U")
+            window_is_in_obs = np.asarray([window in windows_in_obs for window in spectral_windows])
+            if not all(window_is_in_obs):
+                missing_windows = window_is_in_obs == False
+                raise ValueError("Spectral windows {0} not in file {1}".format(spectral_windows[missing_windows],
+                                                                               filenames[0]))
+        # Get indices of FITS extensions corresponding to desired
+        # spectral windows.
+        window_fits_indices = np.nonzero(np.in1d(windows_in_obs, spectral_windows))[0]+1
+        # Extract information on desired spectral windows.
         self.spectral_windows = Table([
-            [hdulist[0].header["TDESC{0}".format(i)]
-             for i in range(1, self.meta["n_spectral_windows"]+1)],
-            [hdulist[0].header["TDET{0}".format(i)]
-             for i in range(1, self.meta["n_spectral_windows"]+1)],
-            Quantity([hdulist[0].header["TWAVE{0}".format(i)]
-                      for i in range(1, self.meta["n_spectral_windows"]+1)], unit="angstrom"),
-            Quantity([hdulist[0].header["TWMIN{0}".format(i)]
-                      for i in range(1, self.meta["n_spectral_windows"]+1)], unit="angstrom"),
-            Quantity([hdulist[0].header["TWMAX{0}".format(i)]
-                      for i in range(1, self.meta["n_spectral_windows"]+1)], unit="angstrom")],
-            names=("name", "detector type", "brightest wavelength",
-                   "min wavelength", "max wavelength"))
+            [hdulist[0].header["TDESC{0}".format(i)] for i in window_fits_indices],
+            [hdulist[0].header["TDET{0}".format(i)] for i in window_fits_indices],
+            Quantity([hdulist[0].header["TWAVE{0}".format(i)] for i in window_fits_indices], unit="angstrom"),
+            Quantity([hdulist[0].header["TWMIN{0}".format(i)] for i in window_fits_indices], unit="angstrom"),
+            Quantity([hdulist[0].header["TWMAX{0}".format(i)] for i in window_fits_indices], unit="angstrom")],
+            names=("name", "detector type", "brightest wavelength", "min wavelength", "max wavelength"))
         # Convert data from each spectral window in first FITS file to
         # an array.  Then combine these arrays into a list.  Each array
         # can then be concatenated with data from subsequent FITS files.
-        data = [np.array(hdulist[i].data) for i in range(1, self.meta["n_spectral_windows"]+1)]
+        data = [np.array(hdulist[i].data) for i in window_fits_indices]
         # Convert auxilary data from first FITS file to an array.
         # Auxilary data from subsequent FITS files can then be
         # concatenated with this array.
@@ -149,8 +158,8 @@ class IRISSpectrum:
                         "OBS start time of current file: {0}".format(hdulist[0].header["STARTOBS"])
                         )
                 self._meta.append([hdu.header for hdu in hdulist])
-                for i in range(self.meta["n_spectral_windows"]):
-                    data[i] = np.concatenate((data[i], np.array(hdulist[i+1].data)), axis=0)
+                for i, j in enumerate(window_fits_indices):
+                    data[i] = np.concatenate((data[i], np.array(hdulist[j].data)), axis=0)
                 auxilary_data = vstack(
                     [auxilary_data, Table(rows=hdulist[-2].data, names=hdulist[-2].header[7:])])
                 level1_info = np.concatenate((
@@ -164,11 +173,9 @@ class IRISSpectrum:
         del(auxilary_data["TIME"])
         # Generate dictionary of SlitSpectrum objects for each spectral window.
         self.data = dict([(self.spectral_windows["name"][i],
-                           SlitSpectrum(
-                               data[i], time_axis,
-                               self._get_axis("slit", self.spectral_windows["name"][i]),
-                               self._get_axis("spectral", self.spectral_windows["name"][i])))
-                          for i in range(self.meta["n_spectral_windows"])])
+                           SlitSpectrum(data[i], time_axis, self._get_axis("slit", self.spectral_windows["name"][i]),
+                                        self._get_axis("spectral", self.spectral_windows["name"][i])))
+                          for i in range(len(window_fits_indices))])
         # Attach auxilary data and level1 info to object.
         self.auxilary_data = auxilary_data
         self.level1_info = level1_info
