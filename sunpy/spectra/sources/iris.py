@@ -326,7 +326,8 @@ class IRISRaster_Xarray(object):
     Assumes roll angle is 0.
     """
     def __init__(self, filenames):
-        # Open file.
+        """Initializes an IRISRaster object."""
+        # Open first file and perform some tasks common to all files.
         hdulist = fits.open(filenames[0])
         # Define indices of hdulist containing primary data.
         window_fits_indices = range(1, len(hdulist)-2)
@@ -338,41 +339,6 @@ class IRISRaster_Xarray(object):
             Quantity([hdulist[0].header["TWMIN{0}".format(i)] for i in window_fits_indices], unit="angstrom"),
             Quantity([hdulist[0].header["TWMAX{0}".format(i)] for i in window_fits_indices], unit="angstrom")],
             names=("name", "detector type", "brightest wavelength", "min wavelength", "max wavelength"))
-        # Put data into dict with each entry representing a spectral window.
-        self.data = dict()
-        data_arrays = []
-        for i in range(len(self.spectral_windows)):
-            wcs_file = wcs.WCS(hdulist[window_fits_indices[i]].header)
-            #w_wave = np.where(np.array(wcs_file) == "WAVE")[0][0]
-            w_wave = 0
-            spectral_coords = Quantity(
-                wcs_file.sub(w_wave+1).all_pix2world(np.arange(hdulist[window_fits_indices[i]].header["NAXIS1"]), 0),
-                unit=wcs_file.wcs.cunit[w_wave]).to("Angstrom")[0]
-            pix = np.array([[y,x] for y in range(hdulist[window_fits_indices[i]].header["NAXIS2"])
-                            for x in range(hdulist[window_fits_indices[i]].header["NAXIS3"])])
-            latlon = wcs_file.celestial.all_pix2world(pix, 0)
-            latitude = Quantity(latlon[:,0].reshape(hdulist[window_fits_indices[i]].header["NAXIS2"],
-                                                    hdulist[window_fits_indices[i]].header["NAXIS3"]),
-                                unit=wcs_file.celestial.wcs.cunit[0]).to("arcsec")
-            longitude = Quantity(latlon[:, 1].reshape(hdulist[window_fits_indices[i]].header["NAXIS2"],
-                                                      hdulist[window_fits_indices[i]].header["NAXIS3"]),
-                                 unit=wcs_file.celestial.wcs.cunit[1]).to("arcsec")
-            da = xarray.DataArray(data=np.array(hdulist[window_fits_indices[i]].data),
-                                  dims=["raster axis", "slit axis", "spectral axis"],
-                                  coords={"wavelength": ("spectral axis", spectral_coords.value),
-                                          "longitude": (("slit axis", "raster axis"), longitude.value),
-                                          "latitude": (("slit axis", "raster axis"), latitude.value),
-                                          "raster position": (
-                                              "raster axis",
-                                              np.arange(hdulist[window_fits_indices[i]].header["NAXIS3"]))
-                                          }
-                                  )
-            da.attrs["wcs"] = wcs_file
-            da.attrs["coordinate units"] = {"wavelength": spectral_coords.unit,
-                                            "longitude": longitude.unit,
-                                            "latitude": latitude.unit,
-                                            "raster position": None}
-            self.data[self.spectral_windows["name"][i]] = xarray.Dataset({"scan 0": da})
         # Attach auxiliary data.
         self.auxilary_data = Table(rows=hdulist[-2].data, names=hdulist[-2].header[7:])
         # Attach level 1 info
@@ -426,6 +392,70 @@ class IRISRaster_Xarray(object):
                      "time step size mean": hdulist[0].header["STEPT_AV"],
                      "time step size sigma": hdulist[0].header["STEPT_DV"],
                      "number spectral windows": hdulist[0].header["NWIN"]}
+        # Close file
+        hdulist.close()
+        # Define empty dictionary with keys corresponding to
+        # spectral windows.  The value of each key will be a
+        # list of xarray data arrays, one for each raster scan.
+        data_arrays = dict([(name, []) for name in self.spectral_windows["name"]])
+        # For each file, extract and stored the data for each spectral
+        # window in the self.data dictionary as an xarray dataset with
+        # each raster scan corresponding to an separate data array.
+        for filename in filenames:
+            # Open file.
+            hdulist = fits.open(filename)
+            # For each spectral window, put data, metadata and
+            # coordinates from file into a data array and append it
+            # to the appropriate list in the data_arrays variable.
+            for i, window in enumerate(self.spectral_windows["name"]):
+                # Create WCS object from FITS header.
+                wcs_file = wcs.WCS(hdulist[window_fits_indices[i]].header)
+                # Find wavelength represented by each pixel in the
+                # spectral dimension by using WCS conversion.
+                spectral_coords = Quantity(
+                    wcs_file.sub(1).all_pix2world(np.arange(hdulist[window_fits_indices[i]].header["NAXIS1"]), 0),
+                    unit=wcs_file.wcs.cunit[0]).to("Angstrom")[0]
+                # Find latitude and longitude represented by each
+                # pixel in the spectral dimension by using WCS
+                # conversion.
+                pix = np.array([[y,x] for y in range(hdulist[window_fits_indices[i]].header["NAXIS2"])
+                                for x in range(hdulist[window_fits_indices[i]].header["NAXIS3"])])
+                latlon = wcs_file.celestial.all_pix2world(pix, 0)
+                latitude = Quantity(latlon[:,0].reshape(hdulist[window_fits_indices[i]].header["NAXIS2"],
+                                                        hdulist[window_fits_indices[i]].header["NAXIS3"]),
+                                    unit=wcs_file.celestial.wcs.cunit[0]).to("arcsec")
+                longitude = Quantity(latlon[:, 1].reshape(hdulist[window_fits_indices[i]].header["NAXIS2"],
+                                                          hdulist[window_fits_indices[i]].header["NAXIS3"]),
+                                     unit=wcs_file.celestial.wcs.cunit[1]).to("arcsec")
+                # Calculate time of measurement at each raster position.
+                times = np.array([parse_time(hdulist[0].header["STARTOBS"])+datetime.timedelta(seconds=s)
+                                  for s in hdulist[-2].data[:,0]])
+                # Put data and coordinates
+                da = xarray.DataArray(data=np.array(hdulist[window_fits_indices[i]].data),
+                                      dims=["raster_axis", "slit_axis", "spectral_axis"],
+                                      coords={"wavelength": ("spectral_axis", spectral_coords.value),
+                                              #"longitude": (("slit_axis", "raster_axis"), longitude.value),
+                                              #"latitude": (("slit_axis", "raster_axis"), latitude.value),
+                                              "raster_position": ("raster_axis", np.arange(
+                                                  hdulist[window_fits_indices[i]].header["NAXIS3"])),
+                                              #"time": ("raster_axis", times)
+                                              })
+                # Attach metadata, including wcs object, to DataArray.
+                da.attrs["wcs"] = wcs_file
+                da.attrs["coordinate units"] = {"wavelength": spectral_coords.unit,
+                                                "longitude": longitude.unit,
+                                                "latitude": latitude.unit,
+                                                "raster_position": None}
+                data_arrays[window].append(da)
+            # Close file
+            hdulist.close()
+        self.data_arrays = data_arrays
+        self.data = dict()
+        for i, window in enumerate(self.spectral_windows["name"]):
+            self.data[window] = xarray.Dataset(dict([("scan {0}".format(j), da)
+                                                     for j, da in enumerate(data_arrays[window])]))
+
+
 
 
 
