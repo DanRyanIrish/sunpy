@@ -563,6 +563,19 @@ class IRISRaster_Xarray(object):
         name_split = self.data[spectral_window].name.split("[")
         self.data[spectral_window].name = "{0}[{1}]".format(name_split[0], unit_str)
 
+    def calculate_intensity_fractional_uncertainty(self, spectral_window):
+        photons_per_dn = self.meta["gain"][detector_type]/self.meta["yield"][detector_type]
+        if self.data[spectral_window].attrs["unit"]["intensity"] != "DN":
+            intensity_ph = photons_per_dn*self._convert_DN_to_photons(spectral_window)
+        elif self.data[spectral_window].attrs["unit"]["intensity"] != "photons":
+            intensity_ph = self.data[spectral_window].data
+        else:
+            raise ValueError("Data not in recognized units: {0}".format(
+                self.data[spectral_window].attrs["unit"]["intensity"]))
+        readout_noise_ph = self.meta["readout noise"][detector_type]["value"]*photons_per_dn
+        uncertainty_ph = np.sqrt(intensity_ph+readout_noise_ph**2.)
+        return uncertainty_ph/intensity_ph
+
 
 def _enter_column_into_table_as_quantity(header_property_name, header, header_colnames, data, unit):
     """Used in initiation of IRISRaster to convert auxiliary data to Quantities."""
