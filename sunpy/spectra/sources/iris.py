@@ -328,9 +328,14 @@ class IRISRaster_Xarray(object):
         # to a list of length 1 for consistent syntax below.
         if type(filenames) is str:
             filenames = [filenames]
+        # Define some empty variable.
+        wcs_objects = dict()
+        raster_index_to_file = []
+        raster_positions = []
+        # Open files and extract data.
         for f, filename in enumerate(filenames):
-            # Open file.
             hdulist = fits.open(filename)
+            # If this is the first file, extract some common metadata.
             if f == 0:
                 # Check user desired spectral windows are in file and
                 # find corresponding indices of HDUs.
@@ -356,6 +361,8 @@ class IRISRaster_Xarray(object):
                     Quantity([hdulist[0].header["TWMIN{0}".format(i)] for i in window_fits_indices], unit="angstrom"),
                     Quantity([hdulist[0].header["TWMAX{0}".format(i)] for i in window_fits_indices], unit="angstrom")],
                     names=("name", "detector type", "brightest wavelength", "min wavelength", "max wavelength"))
+                # Set spectral window name as table index
+                self.spectral_windows.add_index("name")
                 # Find wavelength represented by each pixel in the
                 # spectral dimension by using a WCS object for each spectral
                 # window.
@@ -414,7 +421,12 @@ class IRISRaster_Xarray(object):
                              "time step size mean": hdulist[0].header["STEPT_AV"],
                              "time step size sigma": hdulist[0].header["STEPT_DV"],
                              "spectral windows in OBS": windows_in_obs,
-                             "spectral windows in object": spectral_windows}
+                             "spectral windows in object": spectral_windows,
+                             "detector gain": {"NUV": 18., "FUV1": 6., "FUV2": 6.},
+                             "detector yield": {"NUV": 1., "FUV1": 1.5, "FUV2": 1.5},
+                             "readout noise": {"NUV": {"value": 1.2, "unit": "DN"},
+                                               "FUV1": {"value": 3.1, "unit": "DN"},
+                                               "FUV2": {"value": 3.1, "unit": "DN"}}}
                 # Translate some metadata to be more helpful.
                 if hdulist[0].header["IAECEVFL"] == "YES":
                     self.meta["IAECEVFL"] = True
@@ -431,20 +443,13 @@ class IRISRaster_Xarray(object):
                 # spectral windows.  The value of each key will be a
                 # list of xarray data arrays, one for each raster scan.
                 data_dict = dict([(window_name, None) for window_name in self.spectral_windows["name"]])
-                # Define empty dictionary to hold file specific data,
-                # e.g. wcs object.
-                wcs_objects = dict()
                 # Record header info of auxiliary data.  Should be
                 # consistent between files of same OBS.
                 auxiliary_header = hdulist[-2].header
-                # Define list to hold scan labels for each spectrum.
-                raster_index_to_file = []
-                # Define empty list to hold raster position indices.
-                raster_positions = []
             # Extract the data and meta/auxiliary data.
             # Create WCS object from FITS header and add WCS object
             # wcs dictionary.
-            wcs_celestial = wcs.WCS(hdulist[window_fits_indices[i]].header).celestial
+            wcs_celestial = wcs.WCS(hdulist[1].header).celestial
             scan_label = "scan{0}".format(f)
             wcs_objects[scan_label] = wcs_celestial
             # Append to list representing the scan labels of each
@@ -516,6 +521,42 @@ class IRISRaster_Xarray(object):
                                                              "units", {"wavelength": spectral_coords[window_name].unit,
                                                                        "intensity": "DN"})])))
                           for window_name in self.spectral_windows["name"]])
+
+    def convert_DN_to_photons(self, spectral_window):
+        """Converts DataArray from DN to photon counts."""
+        # Check that DataArray is in units of DN.
+        if "DN" not in self.data[spectral_window].attrs["units"]["intensity"]:
+            raise ValueError("Intensity units of DataArray are not DN.")
+        self.data[spectral_window].data = \
+            self.meta["gain"][detector_type]/self.meta["yield"][detector_type]*self.data[spectral_window].data
+        self.data[spectral_window].name = "Intensity [photons]"
+        self.data[spectral_window].atrrs["units"]["intensity"] = "photons"
+
+    def convert_photons_to_DN(self, spectral_window):
+        """Converts DataArray from DN to photon counts."""
+        # Check that DataArray is in units of DN.
+        if "photons" not in self.data[spectral_window].attrs["units"]["intensity"]:
+            raise ValueError("Intensity units of DataArray are not DN.")
+        self.data[spectral_window].data = \
+            self.meta["yield"][detector_type]/self.meta["gain"][detector_type]*self.data[spectral_window].data
+        self.data[spectral_window].name = "Intensity [DN]"
+        self.data[spectral_window].atrrs["units"]["intensity"] = "DN"
+
+    def apply_exposure_time_correction(self, spectral_window):
+        """Converts DataArray from DN or photons to DN or photons per second."""
+        # Check that DataArray is in units of DN.
+        if "/s" in self.data[spectral_window].attrs["units"]["intensity"]:
+            raise ValueError("Data seems to already be in units per second. '/s' in intensity unit.")
+        detector_type = self.spectral_windows[spectral_window]["detector type"][:3]
+        exp_time_s = self.auxiliary_data["{0} EXPOSURE TIME".format(detector_type)].to("s").value
+        for i in new_da.data[spectral_window].raster_axis.values:
+            self.data[spectral_window].sel(raster_axis=i).data = \
+                self.data[spectral_window].sel(raster_axis=i).data/exp_time_s[i]
+        # Make new unit reflecting the division by time.
+        unit_str = self.data[spectral_window].atrrs["units"]["intensity"]+"/s"
+        self.data[spectral_window].atrrs["units"]["intensity"] = unit_str
+        name_split = self.data[spectral_window].name.split("[")
+        self.data[spectral_window].name = "{0}[{1}]".format(name_split[0], unit_str)
 
 
 def _enter_column_into_table_as_quantity(header_property_name, header, header_colnames, data, unit):
