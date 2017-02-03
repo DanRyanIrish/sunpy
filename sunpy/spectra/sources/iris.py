@@ -322,14 +322,32 @@ class IRISRaster_SpectralCube(object):
 
 class IRISRaster_Xarray(object):
     """An object to hold data from multiple IRIS raster scans."""
-    def __init__(self, filenames):
+    def __init__(self, filenames, spectral_windows="All"):
         """Initializes an IRISRaster object."""
+        # If a single filename has been entered as a string, convert
+        # to a list of length 1 for consistent syntax below.
+        if type(filenames) is str:
+            filenames = [filenames]
         for f, filename in enumerate(filenames):
             # Open file.
             hdulist = fits.open(filename)
             if f == 0:
-                # Define indices of hdulist containing primary data.
-                window_fits_indices = range(1, len(hdulist)-2)
+                # Check user desired spectral windows are in file and
+                # find corresponding indices of HDUs.
+                n_win = int(hdulist[0].header["NWIN"])
+                windows_in_obs = np.array([hdulist[0].header["TDESC{0}".format(i)] for i in range(1, n_win+1)])
+                if spectral_windows == "All":
+                    spectral_windows = windows_in_obs
+                    window_fits_indices = range(1, len(hdulist)-2)
+                else:
+                    spectral_windows = np.asarray(spectral_windows, dtype="U")
+                    window_is_in_obs = np.asarray([window in windows_in_obs for window in spectral_windows])
+                    if not all(window_is_in_obs):
+                        missing_windows = window_is_in_obs == False
+                        raise ValueError(
+                            "Spectral windows {0} not in file {1}".format(spectral_windows[missing_windows],
+                                                                          filenames[0]))
+                    window_fits_indices = np.nonzero(np.in1d(windows_in_obs, spectral_windows))[0]+1
                 # Create table of spectral window info in OBS.
                 self.spectral_windows = Table([
                     [hdulist[0].header["TDESC{0}".format(i)] for i in window_fits_indices],
@@ -395,7 +413,8 @@ class IRISRaster_Xarray(object):
                              "raster step size sigma": hdulist[0].header["STEPS_DV"],
                              "time step size mean": hdulist[0].header["STEPT_AV"],
                              "time step size sigma": hdulist[0].header["STEPT_DV"],
-                             "number spectral windows": hdulist[0].header["NWIN"]}
+                             "spectral windows in OBS": windows_in_obs,
+                             "spectral windows in object": spectral_windows}
                 # Translate some metadata to be more helpful.
                 if hdulist[0].header["IAECEVFL"] == "YES":
                     self.meta["IAECEVFL"] = True
@@ -486,18 +505,17 @@ class IRISRaster_Xarray(object):
         times = [parse_time(self.meta["observation start"])+timedelta(seconds=s) for s in self.auxiliary_data["TIME"]]
         # Convert data for each spectral window into an an
         # xarray.DataArray and enter into data dictionary.
-        self.data = dict()
-        self.data_dict = data_dict
-        self.spectral_coords = spectral_coords
-        for window_name in self.spectral_windows["name"]:
-            self.data[window_name] = xarray.DataArray(data=data_dict[window_name],
-                                                      dims=["raster_axis", "slit_axis", "spectral_axis"],
-                                                      coords={"wavelength": ("spectral_axis",
-                                                                             spectral_coords[window_name].value),
-                                                              "raster_position": ("raster_axis", raster_positions),
-                                                              "time": ("raster_axis", times)})
-            # Attach metadata to DataArray.
-            self.data[window_name].attrs["wavelength units"] = spectral_coords[window_name].unit
+        self.data = dict([(window_name, xarray.DataArray(data=data_dict[window_name],
+                                                         dims=["raster_axis", "slit_axis", "spectral_axis"],
+                                                         coords={"wavelength": ("spectral_axis",
+                                                                                spectral_coords[window_name].value),
+                                                                 "raster_position": ("raster_axis", raster_positions),
+                                                                 "time": ("raster_axis", times)},
+                                                         name="Intensity [DN]",
+                                                         attrs=OrderedDict([(
+                                                             "units", {"wavelength": spectral_coords[window_name].unit,
+                                                                       "intensity": "DN"})])))
+                          for window_name in self.spectral_windows["name"]])
 
 
 def _enter_column_into_table_as_quantity(header_property_name, header, header_colnames, data, unit):
