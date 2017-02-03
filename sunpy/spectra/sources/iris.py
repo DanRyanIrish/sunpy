@@ -422,11 +422,10 @@ class IRISRaster_Xarray(object):
                              "time step size sigma": hdulist[0].header["STEPT_DV"],
                              "spectral windows in OBS": windows_in_obs,
                              "spectral windows in object": spectral_windows,
-                             "detector gain": {"NUV": 18., "FUV1": 6., "FUV2": 6.},
-                             "detector yield": {"NUV": 1., "FUV1": 1.5, "FUV2": 1.5},
+                             "detector gain": {"NUV": 18., "FUV": 6.},
+                             "detector yield": {"NUV": 1., "FUV": 1.5},
                              "readout noise": {"NUV": {"value": 1.2, "unit": "DN"},
-                                               "FUV1": {"value": 3.1, "unit": "DN"},
-                                               "FUV2": {"value": 3.1, "unit": "DN"}}}
+                                               "FUV": {"value": 3.1, "unit": "DN"}}}
                 # Translate some metadata to be more helpful.
                 if hdulist[0].header["IAECEVFL"] == "YES":
                     self.meta["IAECEVFL"] = True
@@ -527,26 +526,32 @@ class IRISRaster_Xarray(object):
         # Check that DataArray is in units of DN.
         if "DN" not in self.data[spectral_window].attrs["units"]["intensity"]:
             raise ValueError("Intensity units of DataArray are not DN.")
-        self.data[spectral_window].data = \
-            self.meta["gain"][detector_type]/self.meta["yield"][detector_type]*self.data[spectral_window].data
+        self.data[spectral_window].data = self._convert_DN_to_photons(spectral_window)
         self.data[spectral_window].name = "Intensity [photons]"
         self.data[spectral_window].atrrs["units"]["intensity"] = "photons"
+
+    def _convert_DN_to_photons(self, spectral_window):
+        detector_type = self.spectral_windows[spectral_window]["detector type"][:3]
+        return self.meta["gain"][detector_type]/self.meta["yield"][detector_type]*self.data[spectral_window].data
 
     def convert_photons_to_DN(self, spectral_window):
         """Converts DataArray from DN to photon counts."""
         # Check that DataArray is in units of DN.
         if "photons" not in self.data[spectral_window].attrs["units"]["intensity"]:
             raise ValueError("Intensity units of DataArray are not DN.")
-        self.data[spectral_window].data = \
-            self.meta["yield"][detector_type]/self.meta["gain"][detector_type]*self.data[spectral_window].data
+        self.data[spectral_window].data = self._convert_photons_to_DN(spectral_window)
         self.data[spectral_window].name = "Intensity [DN]"
         self.data[spectral_window].atrrs["units"]["intensity"] = "DN"
+
+    def _convert_photons_to_DN(self, spectral_window):
+        detector_type = self.spectral_windows[spectral_window]["detector type"][:3]
+        return self.meta["yield"][detector_type]/self.meta["gain"][detector_type]*self.data[spectral_window].data
 
     def apply_exposure_time_correction(self, spectral_window):
         """Converts DataArray from DN or photons to DN or photons per second."""
         # Check that DataArray is in units of DN.
         if "/s" in self.data[spectral_window].attrs["units"]["intensity"]:
-            raise ValueError("Data seems to already be in units per second. '/s' in intensity unit.")
+            raise ValueError("Data seems to already be in units per second. '/s' in intensity unit string.")
         detector_type = self.spectral_windows[spectral_window]["detector type"][:3]
         exp_time_s = self.auxiliary_data["{0} EXPOSURE TIME".format(detector_type)].to("s").value
         for i in new_da.data[spectral_window].raster_axis.values:
