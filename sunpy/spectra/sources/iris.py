@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # Author: Daniel Ryan <ryand5@tcd.ie>
 
-import datetime
-import collections
+from datetime import timedelta
+from collections import OrderedDict
 
 import numpy as np
 from astropy.io import fits
@@ -321,144 +321,206 @@ class IRISRaster_SpectralCube(object):
 
 
 class IRISRaster_Xarray(object):
-    """An object to hold data from multiple IRIS raster scans.
-
-    Assumes roll angle is 0.
-    """
+    """An object to hold data from multiple IRIS raster scans."""
     def __init__(self, filenames):
         """Initializes an IRISRaster object."""
-        # Open first file and perform some tasks common to all files.
-        hdulist = fits.open(filenames[0])
-        # Define indices of hdulist containing primary data.
-        window_fits_indices = range(1, len(hdulist)-2)
-        # Create table of spectral window info in OBS.
-        self.spectral_windows = Table([
-            [hdulist[0].header["TDESC{0}".format(i)] for i in window_fits_indices],
-            [hdulist[0].header["TDET{0}".format(i)] for i in window_fits_indices],
-            Quantity([hdulist[0].header["TWAVE{0}".format(i)] for i in window_fits_indices], unit="angstrom"),
-            Quantity([hdulist[0].header["TWMIN{0}".format(i)] for i in window_fits_indices], unit="angstrom"),
-            Quantity([hdulist[0].header["TWMAX{0}".format(i)] for i in window_fits_indices], unit="angstrom")],
-            names=("name", "detector type", "brightest wavelength", "min wavelength", "max wavelength"))
-        # Attach auxiliary data.
-        self.auxilary_data = Table(rows=hdulist[-2].data, names=hdulist[-2].header[7:])
-        # Attach level 1 info
-        self.level1_info = np.array(hdulist[-1].data)
-        # Put useful metadata into meta attribute.
-        self.meta = {"date data created": parse_time(hdulist[0].header["DATE"]),
-                     "telescope": hdulist[0].header["TELESCOP"],
-                     "instrument": hdulist[0].header["INSTRUME"],
-                     "data level": hdulist[0].header["DATA_LEV"],
-                     "level 2 reformatting version": hdulist[0].header["VER_RF2"],
-                     "level 2 reformatting date": parse_time(hdulist[0].header["DATE_RF2"]),
-                     "data_src": hdulist[0].header["DATA_SRC"],
-                     "origin": hdulist[0].header["origin"],
-                     "build version": hdulist[0].header["BLD_VERS"],
-                     "look-up table ID": hdulist[0].header["LUTID"],
-                     "observation ID": int(hdulist[0].header["OBSID"]),
-                     "observation description": hdulist[0].header["OBS_DESC"],
-                     "observation label": hdulist[0].header["OBSLABEL"],
-                     "observation title": hdulist[0].header["OBSTITLE"],
-                     "observation start": hdulist[0].header["STARTOBS"],
-                     "observation end": hdulist[0].header["ENDOBS"],
-                     "observation repetitions": hdulist[0].header["OBSREP"],
-                     "camera": hdulist[0].header["CAMERA"],
-                     "status": hdulist[0].header["STATUS"],
-                     "data quantity": hdulist[0].header["BTYPE"],
-                     "data unit": hdulist[0].header["BUNIT"],
-                     "BSCALE": hdulist[0].header["BSCALE"],
-                     "BZERO": hdulist[0].header["BZERO"],
-                     "high latitude flag": hdulist[0].header["HLZ"],
-                     "SAA": bool(int(hdulist[0].header["SAA"])),
-                     "satellite roll angle": Quantity(float(hdulist[0].header["SAT_ROT"]), unit=u.deg),
-                     "AEC exposures in OBS": hdulist[0].header["AECNOBS"],
-                     "dsun": Quantity(hdulist[0].header["DSUN_OBS"], unit="m"),
-                     "IAECEVFL": bool(),
-                     "IAECFLAG": bool(),
-                     "IAECFLFL": bool(),
-                     "FOV Y axis": Quantity(float(hdulist[0].header["FOVY"]), unit="arcsec"),
-                     "FOV X axis": Quantity(float(hdulist[0].header["FOVX"]), unit="arcsec"),
-                     "FOV center Y axis": Quantity(float(hdulist[0].header["YCEN"]), unit="arcsec"),
-                     "FOV center X axis": Quantity(float(hdulist[0].header["XCEN"]), unit="arcsec"),
-                     "spectral summing NUV": hdulist[0].header["SUMSPTRN"],
-                     "spectral summing FUV": hdulist[0].header["SUMSPTRF"],
-                     "spatial summing": hdulist[0].header["SUMSPAT"],
-                     "exposure time mean": hdulist[0].header["EXPTIME"],
-                     "exposure time min": hdulist[0].header["EXPMIN"],
-                     "exposure time max": hdulist[0].header["EXPMAX"],
-                     "total exposures in OBS": hdulist[0].header["NEXPOBS"],
-                     "number unique raster positions": hdulist[0].header["NRASTERP"],
-                     "raster step size mean": hdulist[0].header["STEPS_AV"],
-                     "raster step size sigma": hdulist[0].header["STEPS_DV"],
-                     "time step size mean": hdulist[0].header["STEPT_AV"],
-                     "time step size sigma": hdulist[0].header["STEPT_DV"],
-                     "number spectral windows": hdulist[0].header["NWIN"]}
-        # Close file
-        hdulist.close()
-        # Define empty dictionary with keys corresponding to
-        # spectral windows.  The value of each key will be a
-        # list of xarray data arrays, one for each raster scan.
-        data_arrays = dict([(name, []) for name in self.spectral_windows["name"]])
-        # For each file, extract and stored the data for each spectral
-        # window in the self.data dictionary as an xarray dataset with
-        # each raster scan corresponding to an separate data array.
-        for filename in filenames:
+        for f, filename in enumerate(filenames):
             # Open file.
             hdulist = fits.open(filename)
-            # For each spectral window, put data, metadata and
-            # coordinates from file into a data array and append it
-            # to the appropriate list in the data_arrays variable.
-            for i, window in enumerate(self.spectral_windows["name"]):
-                # Create WCS object from FITS header.
-                wcs_file = wcs.WCS(hdulist[window_fits_indices[i]].header)
+            if f == 0:
+                # Define indices of hdulist containing primary data.
+                window_fits_indices = range(1, len(hdulist)-2)
+                # Create table of spectral window info in OBS.
+                self.spectral_windows = Table([
+                    [hdulist[0].header["TDESC{0}".format(i)] for i in window_fits_indices],
+                    [hdulist[0].header["TDET{0}".format(i)] for i in window_fits_indices],
+                    Quantity([hdulist[0].header["TWAVE{0}".format(i)] for i in window_fits_indices], unit="angstrom"),
+                    Quantity([hdulist[0].header["TWMIN{0}".format(i)] for i in window_fits_indices], unit="angstrom"),
+                    Quantity([hdulist[0].header["TWMAX{0}".format(i)] for i in window_fits_indices], unit="angstrom")],
+                    names=("name", "detector type", "brightest wavelength", "min wavelength", "max wavelength"))
                 # Find wavelength represented by each pixel in the
-                # spectral dimension by using WCS conversion.
-                spectral_coords = Quantity(
-                    wcs_file.sub(1).all_pix2world(np.arange(hdulist[window_fits_indices[i]].header["NAXIS1"]), 0),
-                    unit=wcs_file.wcs.cunit[0]).to("Angstrom")[0]
-                # Find latitude and longitude represented by each
-                # pixel in the spectral dimension by using WCS
-                # conversion.
-                pix = np.array([[y,x] for y in range(hdulist[window_fits_indices[i]].header["NAXIS2"])
-                                for x in range(hdulist[window_fits_indices[i]].header["NAXIS3"])])
-                latlon = wcs_file.celestial.all_pix2world(pix, 0)
-                latitude = Quantity(latlon[:,0].reshape(hdulist[window_fits_indices[i]].header["NAXIS2"],
-                                                        hdulist[window_fits_indices[i]].header["NAXIS3"]),
-                                    unit=wcs_file.celestial.wcs.cunit[0]).to("arcsec")
-                longitude = Quantity(latlon[:, 1].reshape(hdulist[window_fits_indices[i]].header["NAXIS2"],
-                                                          hdulist[window_fits_indices[i]].header["NAXIS3"]),
-                                     unit=wcs_file.celestial.wcs.cunit[1]).to("arcsec")
-                # Calculate time of measurement at each raster position.
-                times = np.array([parse_time(hdulist[0].header["STARTOBS"])+datetime.timedelta(seconds=s)
-                                  for s in hdulist[-2].data[:,0]])
-                # Put data and coordinates
-                da = xarray.DataArray(data=np.array(hdulist[window_fits_indices[i]].data),
-                                      dims=["raster_axis", "slit_axis", "spectral_axis"],
-                                      coords={"wavelength": ("spectral_axis", spectral_coords.value),
-                                              #"longitude": (("slit_axis", "raster_axis"), longitude.value),
-                                              #"latitude": (("slit_axis", "raster_axis"), latitude.value),
-                                              "raster_position": ("raster_axis", np.arange(
-                                                  hdulist[window_fits_indices[i]].header["NAXIS3"])),
-                                              #"time": ("raster_axis", times)
-                                              })
-                # Attach metadata, including wcs object, to DataArray.
-                da.attrs["wcs"] = wcs_file
-                da.attrs["coordinate units"] = {"wavelength": spectral_coords.unit,
-                                                "longitude": longitude.unit,
-                                                "latitude": latitude.unit,
-                                                "raster_position": None}
-                data_arrays[window].append(da)
-            # Close file
+                # spectral dimension by using a WCS object for each spectral
+                # window.
+                spectral_coords = dict()
+                for i, window_name in enumerate(self.spectral_windows["name"]):
+                    wcs_spectral = wcs.WCS(hdulist[window_fits_indices[i]].header).sub(1)
+                    spectral_coords[window_name] = Quantity(wcs_spectral.all_pix2world(np.arange(
+                        hdulist[window_fits_indices[i]].header["NAXIS1"]), 0),
+                        unit=wcs_spectral.wcs.cunit[0]).to("Angstrom")[0]
+                # Put useful metadata into meta attribute.
+                self.meta = {"date data created": parse_time(hdulist[0].header["DATE"]),
+                             "telescope": hdulist[0].header["TELESCOP"],
+                             "instrument": hdulist[0].header["INSTRUME"],
+                             "data level": hdulist[0].header["DATA_LEV"],
+                             "level 2 reformatting version": hdulist[0].header["VER_RF2"],
+                             "level 2 reformatting date": parse_time(hdulist[0].header["DATE_RF2"]),
+                             "DATA_SRC": hdulist[0].header["DATA_SRC"],
+                             "origin": hdulist[0].header["origin"],
+                             "build version": hdulist[0].header["BLD_VERS"],
+                             "look-up table ID": hdulist[0].header["LUTID"],
+                             "observation ID": int(hdulist[0].header["OBSID"]),
+                             "observation description": hdulist[0].header["OBS_DESC"],
+                             "observation label": hdulist[0].header["OBSLABEL"],
+                             "observation title": hdulist[0].header["OBSTITLE"],
+                             "observation start": hdulist[0].header["STARTOBS"],
+                             "observation end": hdulist[0].header["ENDOBS"],
+                             "observation repetitions": hdulist[0].header["OBSREP"],
+                             "camera": hdulist[0].header["CAMERA"],
+                             "status": hdulist[0].header["STATUS"],
+                             "data quantity": hdulist[0].header["BTYPE"],
+                             "data unit": hdulist[0].header["BUNIT"],
+                             "BSCALE": hdulist[0].header["BSCALE"],
+                             "BZERO": hdulist[0].header["BZERO"],
+                             "high latitude flag": hdulist[0].header["HLZ"],
+                             "SAA": bool(int(hdulist[0].header["SAA"])),
+                             "satellite roll angle": Quantity(float(hdulist[0].header["SAT_ROT"]), unit=u.deg),
+                             "AEC exposures in OBS": hdulist[0].header["AECNOBS"],
+                             "dsun": Quantity(hdulist[0].header["DSUN_OBS"], unit="m"),
+                             "IAECEVFL": bool(),
+                             "IAECFLAG": bool(),
+                             "IAECFLFL": bool(),
+                             "FOV Y axis": Quantity(float(hdulist[0].header["FOVY"]), unit="arcsec"),
+                             "FOV X axis": Quantity(float(hdulist[0].header["FOVX"]), unit="arcsec"),
+                             "FOV center Y axis": Quantity(float(hdulist[0].header["YCEN"]), unit="arcsec"),
+                             "FOV center X axis": Quantity(float(hdulist[0].header["XCEN"]), unit="arcsec"),
+                             "spectral summing NUV": hdulist[0].header["SUMSPTRN"],
+                             "spectral summing FUV": hdulist[0].header["SUMSPTRF"],
+                             "spatial summing": hdulist[0].header["SUMSPAT"],
+                             "exposure time mean": hdulist[0].header["EXPTIME"],
+                             "exposure time min": hdulist[0].header["EXPMIN"],
+                             "exposure time max": hdulist[0].header["EXPMAX"],
+                             "total exposures in OBS": hdulist[0].header["NEXPOBS"],
+                             "number unique raster positions": hdulist[0].header["NRASTERP"],
+                             "raster step size mean": hdulist[0].header["STEPS_AV"],
+                             "raster step size sigma": hdulist[0].header["STEPS_DV"],
+                             "time step size mean": hdulist[0].header["STEPT_AV"],
+                             "time step size sigma": hdulist[0].header["STEPT_DV"],
+                             "number spectral windows": hdulist[0].header["NWIN"]}
+                # Translate some metadata to be more helpful.
+                if hdulist[0].header["IAECEVFL"] == "YES":
+                    self.meta["IAECEVFL"] = True
+                if hdulist[0].header["IAECFLAG"] == "YES":
+                    self.meta["IAECFLAG"] = True
+                if hdulist[0].header["IAECFLFL"] == "YES":
+                    self.meta["IAECFLFL"] = True
+                if self.meta["data level"] == 2.:
+                    if self.meta["camera"] == 1:
+                        self.meta["camera"] = "spectra"
+                    elif self.meta["camera"] == 2:
+                        self.meta["camera"] = "SJI"
+                # Define empty dictionary with keys corresponding to
+                # spectral windows.  The value of each key will be a
+                # list of xarray data arrays, one for each raster scan.
+                data_dict = dict([(window_name, None) for window_name in self.spectral_windows["name"]])
+                # Define empty dictionary to hold file specific data,
+                # e.g. wcs object.
+                wcs_objects = dict()
+                # Record header info of auxiliary data.  Should be
+                # consistent between files of same OBS.
+                auxiliary_header = hdulist[-2].header
+                # Define list to hold scan labels for each spectrum.
+                raster_index_to_file = []
+                # Define empty list to hold raster position indices.
+                raster_positions = []
+            # Extract the data and meta/auxiliary data.
+            # Create WCS object from FITS header and add WCS object
+            # wcs dictionary.
+            wcs_celestial = wcs.WCS(hdulist[window_fits_indices[i]].header).celestial
+            scan_label = "scan{0}".format(f)
+            wcs_objects[scan_label] = wcs_celestial
+            # Append to list representing the scan labels of each
+            # spectrum.
+            len_raster_axis = hdulist[1].header["NAXIS3"]
+            raster_index_to_file = raster_index_to_file+[scan_label]*len_raster_axis
+            # Append to list representing the raster positions of each
+            # spectrum.
+            raster_positions = raster_positions+list(range(len_raster_axis))
+            # Concatenate auxiliary data arrays from each file.
+            try:
+                auxiliary_data = np.concatenate((auxiliary_data, np.array(hdulist[-2].data)), axis=0)
+            except UnboundLocalError as e:
+                if e.args[0] == "local variable 'auxiliary_data' referenced before assignment":
+                    auxiliary_data = np.array(hdulist[-2].data)
+                else:
+                    raise e
+            # For each spectral window, concatenate data from each file.
+            for i, window_name in enumerate(self.spectral_windows["name"]):
+                try:
+                    data_dict[window_name] = np.concatenate((data_dict[window_name],
+                                                             hdulist[window_fits_indices[i]].data))
+                except ValueError as e:
+                    if e.args[0] == "zero-dimensional arrays cannot be concatenated":
+                        data_dict[window_name] = hdulist[window_fits_indices[i]].data
+                    else:
+                        raise e
+            # Close file.
             hdulist.close()
-        self.data_arrays = data_arrays
+        # Having combined various data from files into common objects,
+        # convert into final data formats and attach to class.
+        # Convert auxiliary data into Table and attach to class.
+        self.auxiliary_data = Table()
+        # Enter certain properties into auxiliary data table as
+        # quantities with units.
+        auxiliary_colnames = [key for key in auxiliary_header.keys()][7:]
+        quantity_colnames = [("TIME", "s"), ("PZTX", "arcsec"), ("PZTY", "arcsec"), ("EXPTIMEF", "s"),
+                             ("EXPTIMEN", "s"), ("XCENIX", "arcsec"), ("YCENIX", "arcsec")]
+        for col in quantity_colnames:
+            self.auxiliary_data[col[0]] = _enter_column_into_table_as_quantity(
+                col[0], auxiliary_header, auxiliary_colnames, auxiliary_data, col[1])
+        # Enter remaining properties into table without units/
+        for i, colname in enumerate(auxiliary_colnames):
+            self.auxiliary_data[colname] = auxiliary_data[:, auxiliary_header[colname]]
+        # Reorder columns so they reflect order in data file.
+        self.auxiliary_data = self.auxiliary_data[[key for key in auxiliary_header.keys()][7:]]
+        # Rename some columns to be more user friendly.
+        rename_colnames = [("EXPTIMEF", "FUV EXPOSURE TIME"), ("EXPTIMEN", "NUV EXPOSURE TIME")]
+        for col in rename_colnames:
+            self.auxiliary_data.rename_column(col[0], col[1])
+        # Add column designating what scan/file number each spectra
+        # comes from.  This can be used to determine the corresponding
+        # wcs object and level 1 info.
+        self.auxiliary_data["scan"] = raster_index_to_file
+        # Attach dictionary containing level 1 and wcs info for each file used.
+        self.wcs_celestial = wcs_objects
+        # Calculate measurement time of each spectrum.
+        times = [parse_time(self.meta["observation start"])+timedelta(seconds=s) for s in self.auxiliary_data["TIME"]]
+        # Convert data for each spectral window into an an
+        # xarray.DataArray and enter into data dictionary.
         self.data = dict()
-        for i, window in enumerate(self.spectral_windows["name"]):
-            self.data[window] = xarray.Dataset(dict([("scan {0}".format(j), da)
-                                                     for j, da in enumerate(data_arrays[window])]))
+        self.data_dict = data_dict
+        self.spectral_coords = spectral_coords
+        for window_name in self.spectral_windows["name"]:
+            self.data[window_name] = xarray.DataArray(data=data_dict[window_name],
+                                                      dims=["raster_axis", "slit_axis", "spectral_axis"],
+                                                      coords={"wavelength": ("spectral_axis",
+                                                                             spectral_coords[window_name].value),
+                                                              "raster_position": ("raster_axis", raster_positions),
+                                                              "time": ("raster_axis", times)})
+            # Attach metadata to DataArray.
+            self.data[window_name].attrs["wavelength units"] = spectral_coords[window_name].unit
 
 
+def _enter_column_into_table_as_quantity(header_property_name, header, header_colnames, data, unit):
+    """Used in initiation of IRISRaster to convert auxiliary data to Quantities."""
+    index = np.where(np.array(header_colnames) == header_property_name)[0]
+    if len(index) == 1:
+        index = index[0]
+    else:
+        raise ValueError("Multiple property names equal to {0}".format(header_property_name))
+    pop_colname = header_colnames.pop(index)
+    return Quantity(data[:, header[pop_colname]], unit=unit)
 
 
-
-
-
-
+def calc_lat_lon_for_raster_position():
+    # Find latitude and longitude represented by each
+    # pixel in the spectral dimension by using WCS
+    # conversion.
+    pix = np.array([[y, x] for y in range(hdulist[window_fits_indices[i]].header["NAXIS2"])
+                    for x in range(hdulist[window_fits_indices[i]].header["NAXIS3"])])
+    latlon = wcs_celestial.celestial.all_pix2world(pix, 0)
+    latitude = Quantity(latlon[:, 0].reshape(hdulist[window_fits_indices[i]].header["NAXIS2"],
+                                             hdulist[window_fits_indices[i]].header["NAXIS3"]),
+                        unit=wcs_celestial.celestial.wcs.cunit[0]).to("arcsec")
+    longitude = Quantity(latlon[:, 1].reshape(hdulist[window_fits_indices[i]].header["NAXIS2"],
+                                              hdulist[window_fits_indices[i]].header["NAXIS3"]),
+                         unit=wcs_celestial.celestial.wcs.cunit[1]).to("arcsec")
