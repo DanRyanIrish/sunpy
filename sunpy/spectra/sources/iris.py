@@ -14,6 +14,7 @@ from spectral_cube import SpectralCube
 import xarray
 
 from sunpy.time import parse_time
+from sunpy.instr.iris import iris
 #from sunpy.spectra.spectrum import SlitSpectrum
 
 import imp
@@ -422,10 +423,9 @@ class IRISRaster_Xarray(object):
                              "time step size sigma": hdulist[0].header["STEPT_DV"],
                              "spectral windows in OBS": windows_in_obs,
                              "spectral windows in object": spectral_windows,
-                             "detector gain": {"NUV": 18., "FUV": 6.},
-                             "detector yield": {"NUV": 1., "FUV": 1.5},
-                             "readout noise": {"NUV": {"value": 1.2, "unit": "DN"},
-                                               "FUV": {"value": 3.1, "unit": "DN"}}}
+                             "detector gain": iris.DETECTOR_GAIN,
+                             "detector yield": iris.DETECTOR_YIELD,
+                             "readout noise": iris.READOUT_NOISE}
                 # Translate some metadata to be more helpful.
                 if hdulist[0].header["IAECEVFL"] == "YES":
                     self.meta["IAECEVFL"] = True
@@ -526,26 +526,18 @@ class IRISRaster_Xarray(object):
         # Check that DataArray is in units of DN.
         if "DN" not in self.data[spectral_window].attrs["units"]["intensity"]:
             raise ValueError("Intensity units of DataArray are not DN.")
-        self.data[spectral_window].data = self._convert_DN_to_photons(spectral_window)
+        self.data[spectral_window].data = iris.convert_DN_to_photons(spectral_window)
         self.data[spectral_window].name = "Intensity [photons]"
         self.data[spectral_window].atrrs["units"]["intensity"] = "photons"
-
-    def _convert_DN_to_photons(self, spectral_window):
-        detector_type = self.spectral_windows[spectral_window]["detector type"][:3]
-        return self.meta["gain"][detector_type]/self.meta["yield"][detector_type]*self.data[spectral_window].data
 
     def convert_photons_to_DN(self, spectral_window):
         """Converts DataArray from DN to photon counts."""
         # Check that DataArray is in units of DN.
         if "photons" not in self.data[spectral_window].attrs["units"]["intensity"]:
             raise ValueError("Intensity units of DataArray are not DN.")
-        self.data[spectral_window].data = self._convert_photons_to_DN(spectral_window)
+        self.data[spectral_window].data = iris.convert_photons_to_DN(spectral_window)
         self.data[spectral_window].name = "Intensity [DN]"
         self.data[spectral_window].atrrs["units"]["intensity"] = "DN"
-
-    def _convert_photons_to_DN(self, spectral_window):
-        detector_type = self.spectral_windows[spectral_window]["detector type"][:3]
-        return self.meta["yield"][detector_type]/self.meta["gain"][detector_type]*self.data[spectral_window].data
 
     def apply_exposure_time_correction(self, spectral_window):
         """Converts DataArray from DN or photons to DN or photons per second."""
@@ -564,17 +556,9 @@ class IRISRaster_Xarray(object):
         self.data[spectral_window].name = "{0}[{1}]".format(name_split[0], unit_str)
 
     def calculate_intensity_fractional_uncertainty(self, spectral_window):
-        photons_per_dn = self.meta["gain"][detector_type]/self.meta["yield"][detector_type]
-        if self.data[spectral_window].attrs["unit"]["intensity"] != "DN":
-            intensity_ph = photons_per_dn*self._convert_DN_to_photons(spectral_window)
-        elif self.data[spectral_window].attrs["unit"]["intensity"] != "photons":
-            intensity_ph = self.data[spectral_window].data
-        else:
-            raise ValueError("Data not in recognized units: {0}".format(
-                self.data[spectral_window].attrs["unit"]["intensity"]))
-        readout_noise_ph = self.meta["readout noise"][detector_type]["value"]*photons_per_dn
-        uncertainty_ph = np.sqrt(intensity_ph+readout_noise_ph**2.)
-        return uncertainty_ph/intensity_ph
+        return iris.calculate_intensity_fractional_uncertainty(
+            self.data[spectral_window].data, self.data[spectral_window].atrrs["units"][intensity],
+            self.spectral_windows[spectral_window]["detector type"][:3])
 
 
 def _enter_column_into_table_as_quantity(header_property_name, header, header_colnames, data, unit):
