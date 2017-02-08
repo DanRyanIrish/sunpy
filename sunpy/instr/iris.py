@@ -1,9 +1,15 @@
 """
 Some very beta tools for IRIS
 """
+import datetime
+
+from astropy.io import fits
+import astropy.units as u
+from astropy import wcs
+from astropy.modeling import models, fitting
 
 import sunpy.io
-import sunpy.time
+from sunpy.time import parse_time
 import sunpy.map
 
 __all__ = ['SJI_to_cube']
@@ -65,20 +71,24 @@ def SJI_to_cube(filename, start=0, stop=None, hdu=0):
 
     return iris_cube
 
+
 def convert_DN_to_photons(data, detector_type):
     return DETECTOR_GAIN[detector_type]/DETECTOR_YIELD[detector_type]*data
+
 
 def convert_photons_to_DN(data, detector_type):
     return DETECTOR_YIELD[detector_type]/DETECTOR_GAIN[detector_type]*data
 
+
 def calculate_intensity_fractional_uncertainty(data, data_unit, detector_type):
     photons_per_dn = DETECTOR_GAIN[detector_type]/DETECTOR_YIELD[detector_type]
     if data_unit == "DN":
-        intensity_ph = photons_per_dn*self._convert_DN_to_photons(spectral_window)
+        intensity_ph = photons_per_dn*convert_DN_to_photons(data, detector_type)
     elif data_unit == "photons":
         intensity_ph = self.data[spectral_window].data
     else:
-        raise ValueError("Data not in recognized units: {0}".format(data_unit)
+        raise ValueError("Data not in recognized units: {0}".format(data_unit))
     readout_noise_ph = READOUT_NOISE[detector_type]["value"]*photons_per_dn
     uncertainty_ph = np.sqrt(intensity_ph+readout_noise_ph**2.)
     return uncertainty_ph/intensity_ph
+
