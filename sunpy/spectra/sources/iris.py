@@ -14,7 +14,12 @@ from spectral_cube import SpectralCube
 import xarray
 
 from sunpy.time import parse_time
-from sunpy.instr.iris import iris
+#from sunpy.instr import iris
+
+import imp
+import os.path
+instr_iris = imp.load_source("iris", os.path.expanduser(os.path.join("~", "sunpy_dev", "sunpy",
+                                                                     "sunpy", "instr", "iris.py")))
 
 
 class IRISRaster(object):
@@ -42,6 +47,8 @@ class IRISRaster(object):
                     spectral_windows = windows_in_obs
                     window_fits_indices = range(1, len(hdulist)-2)
                 else:
+                    if type(spectral_windows) is str:
+                        spectral_windows = [spectral_windows]
                     spectral_windows = np.asarray(spectral_windows, dtype="U")
                     window_is_in_obs = np.asarray([window in windows_in_obs for window in spectral_windows])
                     if not all(window_is_in_obs):
@@ -119,9 +126,9 @@ class IRISRaster(object):
                              "time step size sigma": hdulist[0].header["STEPT_DV"],
                              "spectral windows in OBS": windows_in_obs,
                              "spectral windows in object": spectral_windows,
-                             "detector gain": iris.DETECTOR_GAIN,
-                             "detector yield": iris.DETECTOR_YIELD,
-                             "readout noise": iris.READOUT_NOISE}
+                             "detector gain": instr_iris.DETECTOR_GAIN,
+                             "detector yield": instr_iris.DETECTOR_YIELD,
+                             "readout noise": instr_iris.READOUT_NOISE}
                 # Translate some metadata to be more helpful.
                 if hdulist[0].header["IAECEVFL"] == "YES":
                     self.meta["IAECEVFL"] = True
@@ -164,12 +171,14 @@ class IRISRaster(object):
                     raise e
             # For each spectral window, concatenate data from each file.
             for i, window_name in enumerate(self.spectral_windows["name"]):
+                # Set invalid data values to NaN.
+                data_nan_masked = hdulist[window_fits_indices[i]].data
+                data_nan_masked[np.where(hdulist[window_fits_indices[i]].data == -200.)] = np.nan
                 try:
-                    data_dict[window_name] = np.concatenate((data_dict[window_name],
-                                                             hdulist[window_fits_indices[i]].data))
+                    data_dict[window_name] = np.concatenate((data_dict[window_name], data_nan_masked))
                 except ValueError as e:
                     if e.args[0] == "zero-dimensional arrays cannot be concatenated":
-                        data_dict[window_name] = hdulist[window_fits_indices[i]].data
+                        data_dict[window_name] = data_nan_masked
                     else:
                         raise e
             # Close file.
@@ -181,8 +190,9 @@ class IRISRaster(object):
         # Enter certain properties into auxiliary data table as
         # quantities with units.
         auxiliary_colnames = [key for key in auxiliary_header.keys()][7:]
-        quantity_colnames = [("TIME", "s"), ("PZTX", "arcsec"), ("PZTY", "arcsec"), ("EXPTIMEF", "s"),
-                             ("EXPTIMEN", "s"), ("XCENIX", "arcsec"), ("YCENIX", "arcsec")]
+        quantity_colnames = [("TIME", "s"), ("PZTX", "arcsec"), ("PZTY", "arcsec"),
+                             ("EXPTIMEF", "s"), ("EXPTIMEN", "s"), ("XCENIX", "arcsec"),
+                             ("YCENIX", "arcsec"), ("OBS_VRIX", "m/s")]
         for col in quantity_colnames:
             self.auxiliary_data[col[0]] = _enter_column_into_table_as_quantity(
                 col[0], auxiliary_header, auxiliary_colnames, auxiliary_data, col[1])
@@ -216,6 +226,7 @@ class IRISRaster(object):
                                                              "units", {"wavelength": spectral_coords[window_name].unit,
                                                                        "intensity": "DN"})])))
                           for window_name in self.spectral_windows["name"]])
+
 
     def convert_DN_to_photons(self, spectral_window):
         """Converts DataArray from DN to photon counts."""
