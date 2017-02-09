@@ -5,15 +5,15 @@ from datetime import timedelta
 from collections import OrderedDict
 
 import numpy as np
+import xarray
 from astropy.io import fits
 import astropy.units as u
 from astropy.units.quantity import Quantity
 from astropy.table import Table, vstack
 from astropy import wcs
-from spectral_cube import SpectralCube
-import xarray
 
 from sunpy.time import parse_time
+from sunpy.sun import constants
 #from sunpy.instr import iris
 
 import imp
@@ -30,8 +30,9 @@ class IRISRaster(object):
         # to a list of length 1 for consistent syntax below.
         if type(filenames) is str:
             filenames = [filenames]
-        # Define some empty variable.
-        wcs_objects = dict()
+        # Define some empty variables.
+        wcs_celestial_objects = dict()
+        wcs_spectral_objects = dict()
         raster_index_to_file = []
         raster_positions = []
         # Open files and extract data.
@@ -76,6 +77,7 @@ class IRISRaster(object):
                     spectral_coords[window_name] = Quantity(wcs_spectral.all_pix2world(np.arange(
                         hdulist[window_fits_indices[i]].header["NAXIS1"]), 0),
                         unit=wcs_spectral.wcs.cunit[0]).to("Angstrom")[0]
+                    wcs_spectral_objects[window_name] = wcs_spectral
                 # Put useful metadata into meta attribute.
                 self.meta = {"date data created": parse_time(hdulist[0].header["DATE"]),
                              "telescope": hdulist[0].header["TELESCOP"],
@@ -153,7 +155,7 @@ class IRISRaster(object):
             # wcs dictionary.
             wcs_celestial = wcs.WCS(hdulist[1].header).celestial
             scan_label = "scan{0}".format(f)
-            wcs_objects[scan_label] = wcs_celestial
+            wcs_celestial_objects[scan_label] = wcs_celestial
             # Append to list representing the scan labels of each
             # spectrum.
             len_raster_axis = hdulist[1].header["NAXIS3"]
@@ -210,7 +212,7 @@ class IRISRaster(object):
         # wcs object and level 1 info.
         self.auxiliary_data["scan"] = raster_index_to_file
         # Attach dictionary containing level 1 and wcs info for each file used.
-        self.wcs_celestial = wcs_objects
+        self.wcs = {"spectral": wcs_spectral_objects, "celestial": wcs_celestial_objects}
         # Calculate measurement time of each spectrum.
         times = [parse_time(self.meta["observation start"])+timedelta(seconds=s) for s in self.auxiliary_data["TIME"]]
         # Convert data for each spectral window into an an
@@ -263,7 +265,7 @@ class IRISRaster(object):
         self.data[spectral_window].name = "{0}[{1}]".format(name_split[0], unit_str)
 
     def calculate_intensity_fractional_uncertainty(self, spectral_window):
-        return iris.calculate_intensity_fractional_uncertainty(
+        return instr_iris.calculate_intensity_fractional_uncertainty(
             self.data[spectral_window].data, self.data[spectral_window].atrrs["units"][intensity],
             self.spectral_windows[spectral_window]["detector type"][:3])
 
