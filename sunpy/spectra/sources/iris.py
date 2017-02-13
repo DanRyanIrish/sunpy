@@ -3,6 +3,7 @@
 
 from datetime import timedelta
 from collections import OrderedDict
+import copy
 
 import numpy as np
 import xarray
@@ -11,9 +12,10 @@ import astropy.units as u
 from astropy.units.quantity import Quantity
 from astropy.table import Table, vstack
 from astropy import wcs
+from astropy import constants
+from scipy import interpolate
 
 from sunpy.time import parse_time
-from sunpy.sun import constants
 #from sunpy.instr import iris
 
 import imp
@@ -174,8 +176,8 @@ class IRISRaster(object):
             # For each spectral window, concatenate data from each file.
             for i, window_name in enumerate(self.spectral_windows["name"]):
                 # Set invalid data values to NaN.
-                data_nan_masked = hdulist[window_fits_indices[i]].data
-                data_nan_masked[np.where(hdulist[window_fits_indices[i]].data == -200.)] = np.nan
+                data_nan_masked = copy.deepcopy(hdulist[window_fits_indices[i]].data)
+                data_nan_masked[hdulist[window_fits_indices[i]].data == -200.] = np.nan
                 try:
                     data_dict[window_name] = np.concatenate((data_dict[window_name], data_nan_masked))
                 except ValueError as e:
@@ -239,6 +241,7 @@ class IRISRaster(object):
         self.data[spectral_window].name = "Intensity [photons]"
         self.data[spectral_window].atrrs["units"]["intensity"] = "photons"
 
+
     def convert_photons_to_DN(self, spectral_window):
         """Converts DataArray from DN to photon counts."""
         # Check that DataArray is in units of DN.
@@ -248,26 +251,27 @@ class IRISRaster(object):
         self.data[spectral_window].name = "Intensity [DN]"
         self.data[spectral_window].atrrs["units"]["intensity"] = "DN"
 
+
     def apply_exposure_time_correction(self, spectral_window):
         """Converts DataArray from DN or photons to DN or photons per second."""
         # Check that DataArray is in units of DN.
         if "/s" in self.data[spectral_window].attrs["units"]["intensity"]:
             raise ValueError("Data seems to already be in units per second. '/s' in intensity unit string.")
-        detector_type = self.spectral_windows[spectral_window]["detector type"][:3]
+        detector_type = self.spectral_windows.loc[spectral_window]["detector type"][:3]
         exp_time_s = self.auxiliary_data["{0} EXPOSURE TIME".format(detector_type)].to("s").value
-        for i in new_da.data[spectral_window].raster_axis.values:
-            self.data[spectral_window].sel(raster_axis=i).data = \
-                self.data[spectral_window].sel(raster_axis=i).data/exp_time_s[i]
+        for i in self.data[spectral_window].raster_axis.values:
+            self.data[spectral_window].data[i, :, :] = self.data[spectral_window].data[i, :, :]/exp_time_s[i]
         # Make new unit reflecting the division by time.
-        unit_str = self.data[spectral_window].atrrs["units"]["intensity"]+"/s"
-        self.data[spectral_window].atrrs["units"]["intensity"] = unit_str
+        unit_str = self.data[spectral_window].attrs["units"]["intensity"]+"/s"
+        self.data[spectral_window].attrs["units"]["intensity"] = unit_str
         name_split = self.data[spectral_window].name.split("[")
         self.data[spectral_window].name = "{0}[{1}]".format(name_split[0], unit_str)
 
+
     def calculate_intensity_fractional_uncertainty(self, spectral_window):
         return instr_iris.calculate_intensity_fractional_uncertainty(
-            self.data[spectral_window].data, self.data[spectral_window].atrrs["units"][intensity],
-            self.spectral_windows[spectral_window]["detector type"][:3])
+            self.data[spectral_window].data, self.data[spectral_window].attrs["units"]["intensity"],
+            self.spectral_windows.loc[spectral_window]["detector type"][:3])
 
 
 def _enter_column_into_table_as_quantity(header_property_name, header, header_colnames, data, unit):
